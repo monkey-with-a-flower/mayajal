@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Any
 
 
 class GetLabs(BaseModel):
@@ -11,4 +12,4 @@ class GetLab(BaseModel):
 class CreateLab(BaseModel):
     name: str
     description: str | None
-    machines: dict[str]
+    machines: dict[str,Any] 
