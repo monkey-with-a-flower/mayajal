@@ -1,8 +1,53 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException,status
+from sqlalchemy.orm import Session
+
+from api.db import get_db
+from api.models.users import User
+from api.schemes.users import ModifyUser
+from api.get_current_user import get_current_user
 
 
 router = APIRouter()
 
-@router.get("")
-def getUser():
-    pass
+@router.get("/")
+def getUser(db: Session = Depends( get_db)):
+    user=db.query("User").all()
+    return user
+
+
+
+@router.patch("/")
+def updateUser(payload: ModifyUser , db: Session =Depends(get_db), current_user: User = Depends(get_current_user)):
+    if payload:
+        current_user.name = payload.name
+        current_user.email =payload.email
+        try:
+            db.commit()
+            db.refresh(current_user)
+        except Exception as e:
+            raise HTTPException(
+                status_code= status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail= str(e)
+            )   
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
+    
+@router.delete("/{userId}")
+def deleteUser(userId: str, db:Session = Depends(get_db), current_user = Depends(get_current_user)):
+    if userId:
+        user = db.query(User).filter(User.id == userId).first()
+        try: 
+            db.delete(user)
+            db.commit()
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e)
+            )
+    else:
+        raise HTTPException(
+            status_code= status.HTTP_400_BAD_REQUEST
+        )
