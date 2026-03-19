@@ -40,7 +40,6 @@ def createMachine(payload:CreateMachine, db:Session = Depends(get_db)):
     try:
         db.add(machine)
         db.commit()
-        db.refresh()
     except Exception as e:
         db.rollback()
         raise HTTPException(HTTPException(
@@ -49,17 +48,17 @@ def createMachine(payload:CreateMachine, db:Session = Depends(get_db)):
         ))
 
 @router.patch("/{machineId}")
-def patchMachine(payload: CreateMachine, db: Session = Depends(get_db)):
-    machine:Machine = db.query(Machine).filter(Machine.id == payload.id).first()
+def patchMachine(machineId: str,payload: CreateMachine, db: Session = Depends(get_db)):
+    machine:Machine = db.query(Machine).filter(Machine.id == machineId).first()
     
     if machine:
         machine.imageUrl = payload.imageUrl
         machine.volumes = payload.volumes
         machine.env=payload.env
-        machine.restart_policy = payload.restart_policy,
-        machine.commands = payload.commands,
-        machine.console = payload.console,
-        machine.name = payload.name,
+        machine.restart_policy = payload.restart_policy
+        machine.commands = payload.commands
+        machine.console = payload.console
+        machine.name = payload.name
         machine.os_type = payload.os_type
         try: 
             db.commit()
@@ -80,10 +79,10 @@ def patchMachine(payload: CreateMachine, db: Session = Depends(get_db)):
 
 
 @router.delete("/{machineId}")
-def deleteMachine(machineID: str,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
+def deleteMachine(machineID: str,db:Session = Depends(get_db)):
     if machineID:
         try:
-            machine = db.query(Machine).filter(Machine.owner_id == current_user.id).first()
+            machine = db.query(Machine).filter(Machine.id == machineID).first()
             db.delete(machine)
             db.commit()
         except Exception as e:
