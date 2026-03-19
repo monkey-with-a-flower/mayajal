@@ -9,9 +9,30 @@ from api.get_current_user import get_current_user
 
 router = APIRouter()
 
+@router.post("/")
+def createUser(payload:ModifyUser, db:Session = Depends(get_db)):
+    if payload:
+        user = User(
+            name = payload.name,
+            email = payload.email
+        )
+        try: 
+            db.add(user)
+            db.commit()
+        except Exception as e:
+            raise HTTPException(
+                status_code= status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail= str(e)
+            )
+        return user
+    else:
+        raise HTTPException(
+            status_code= status.HTTP_400_BAD_REQUEST
+        )
+
 @router.get("/")
 def getUser(db: Session = Depends( get_db)):
-    user=db.query("User").all()
+    user=db.query(User).all()
     return user
 
 

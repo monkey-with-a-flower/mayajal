@@ -12,7 +12,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(
         String(36),
         primary_key=True,
-        nullable=False)
+        nullable=False,default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(100),unique=False,nullable=False)
     email: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     labs: Mapped[list["Lab"]] = relationship("Lab", back_populates="owner") # type: ignore

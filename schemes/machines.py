@@ -16,8 +16,8 @@ class GetMachine(BaseModel):
 
 class CreateMachine(BaseModel):
     imageUrl: str
-    volumes:dict | None
-    env: dict | None
+    volumes:dict[str,str] | None
+    env: dict[str,str] | None
     restart_policy: restartPolicy | None
     commands: dict | None
     console: bool | None
