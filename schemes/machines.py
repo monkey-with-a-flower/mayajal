@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Literal
+from typing import Literal,Optional
 
 
 
@@ -16,10 +16,10 @@ class GetMachine(BaseModel):
 
 class CreateMachine(BaseModel):
     imageUrl: str
-    volumes:dict[str,str] | None
-    env: dict[str,str] | None
-    restart_policy: restartPolicy | None
-    commands: dict | None
-    console: bool | None
+    volumes:Optional[dict[str,str]] = None
+    env: Optional[dict[str,str]] = None
+    restart_policy: Optional[restartPolicy] = "Unless stopped"
+    commands: Optional[dict[str,str] ] = None
+    console: Optional[bool ] = True
     name: str
     os_type: osTypes
