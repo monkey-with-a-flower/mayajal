@@ -15,7 +15,6 @@ class GetMachine(BaseModel):
     machineID: str
 
 class CreateMachine(BaseModel):
-   
     imageUrl: str
     volumes:dict | None
     env: dict | None
