@@ -2,6 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session,DeclarativeBase
 from pathlib import Path
 
+from api.config import  DB_DIR
+
 
 
 class Base(DeclarativeBase):
@@ -9,8 +11,8 @@ class Base(DeclarativeBase):
 
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATABASE_URL = f"sqlite:///{BASE_DIR / 'db' / 'mayajal.db'}"
+
+DATABASE_URL = f"sqlite:///{DB_DIR}"
 
 engine = create_engine(
     DATABASE_URL,
