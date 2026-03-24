@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from api.config import ASSETS_DIR, LAB_DIR
+from api.config import ASSETS_DIR, LAB_DIR, MACHINE_DIR
 from api.db import get_db
 from api.models.labs import Lab
 import subprocess
@@ -12,7 +12,7 @@ def startLab(lab: Lab):
     
     for machine in lab.machines:
         command.append("-f")
-        command.append(f"{machine.id}.yml")
+        command.append(f"{str(MACHINE_DIR)}/{machine.id}.yml")
     command.append("--env-file")
     command.append(f"{str(labdir)}/.env")
     command.append("-p")
@@ -21,8 +21,12 @@ def startLab(lab: Lab):
     command.append("-d")
     try:
         print (command)
-        result = subprocess.run(command,capture_output=True, text=True)
-        return result.stdout.strip()
+        result = subprocess.run(command,capture_output=True, text=True,check=False)
+        return {
+            "stdout":result.stdout,
+            "stderr":result.stderr,
+            "returncode":result.returncode,
+        }
     except subprocess.CalledProcessError as e:
         print("Error:", e.stderr)
     
