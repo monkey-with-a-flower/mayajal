@@ -1,0 +1,9 @@
+services:
+  Juice Shop:
+    image: bkimminich/juice-shop
+    container_name: ${LABID}_Juice Shop
+    tty: true
+    restart: unless-stopped
+    networks:
+      - ${LABID}
+ 

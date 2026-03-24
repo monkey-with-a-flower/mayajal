@@ -1,0 +1,48 @@
+services:
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: ${LABID}_wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Australia/Sydney
+      - SERVERURL=${MASTERURl}
+      - SERVERPORT=${LABPORT}
+      - PEERS=${PEERS}
+      - PEERDNS=1.1.1.1
+      - INTERNAL_SUBNET=10.13.13.0/24
+      # - ALLOWEDIPS=${LAB_SUBNET},${WG_SUBNET}
+    # volumes:
+    #   - ./config/wireguard:/config
+    #   - /lib/modules:/lib/modules:ro
+    ports:
+      - "${LABPORT}:51820/udp"
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    networks:
+      - ${LABID}
+    restart: unless-stopped
+
+  suricata:
+    image: jasonish/suricata:latest
+    container_name: ${LABID}_suricata
+    cap_add:
+      - NET_ADMIN
+    # volumes:
+    #   - ./config/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+    #   - ./logs/suricata:/var/log/suricata
+    #   - ./rules:/var/lib/suricata/rules
+    #   - ./custom-data:/custom-data
+    command: ["-i", "eth0", "-c", "/etc/suricata/suricata.yaml", "-v"]
+    networks:
+      - ${LABID}
+    restart: unless-stopped
+
+networks:
+  lab_net:
+    name: ${LAB_ID}
+    driver: bridge
+    internal: true
