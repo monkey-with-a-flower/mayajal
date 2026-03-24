@@ -1,9 +1,0 @@
-services:
-  Ubuntu:
-    image: ubuntu:latest
-    container_name: ${LABID}_Ubuntu
-    tty: true
-    restart: unless-stopped
-    networks:
-      - ${LABID}
- 
