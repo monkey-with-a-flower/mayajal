@@ -1,7 +1,5 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session,DeclarativeBase
-from pathlib import Path
-
 from api.config import  DB_DIR
 
 
@@ -11,7 +9,7 @@ class Base(DeclarativeBase):
 
 
 
-
+DB_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_URL = f"sqlite:///{DB_DIR}"
 
 engine = create_engine(
