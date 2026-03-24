@@ -10,7 +10,6 @@ from api.models.machines import Machine
 from api.models.users import User
 from api.schemes.labs import CreateLab
 from api.services.labs import startLab
-import os
 from jinja2 import Template
 router = APIRouter()
 
