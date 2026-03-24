@@ -18,7 +18,11 @@ def startLab(lab: Lab):
     command.append(f"{lab.id}")
     command.append("-p")
     command.append(f"{lab.id}")
-    result = subprocess.run(command,capture_output=True, text=True)
-    return result.stdout.strip()
+    try:
+        print (command)
+        result = subprocess.run(command,capture_output=True, text=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print("Error:", e.stderr)
     
 
