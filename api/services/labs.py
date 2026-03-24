@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from api.config import LAB_DIR
+from api.config import ASSETS_DIR, LAB_DIR
 from api.db import get_db
 from api.models.labs import Lab
 import subprocess
@@ -8,11 +8,12 @@ import subprocess
 
 def startLab(lab: Lab):
     labdir = Path(f"{LAB_DIR}/{lab.id}")
-    command = ["docker-compose"]
+    command = ["docker-compose","-f",f"{str(ASSETS_DIR)}/base_compose.yml"]
+    
     for machine in lab.machines:
         command.append("-f")
         command.append(f"{machine.id}.yml")
-    command.append("-e")
+    command.append("--env-file")
     command.append(f"{str(labdir)}/.env")
     command.append("-p")
     command.append(f"{lab.id}")
