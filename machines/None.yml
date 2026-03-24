@@ -1,0 +1,9 @@
+services:
+  ubuntu:
+    image: ubuntu
+    container_name: ${LABID}_ubuntu
+    tty: True
+    restart_policy: unless-stopped
+    networks:
+      - ${LAB_ID}
+ 

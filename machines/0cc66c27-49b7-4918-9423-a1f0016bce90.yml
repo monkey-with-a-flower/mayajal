@@ -1,0 +1,63 @@
+services:
+
+  mysql:
+    image: startrek-payroll-mysql
+    container_name: startrek-payroll-mysql
+    restart: unless-stopped
+    build:
+      context: mysql
+      dockerfile: Dockerfile
+    environment:
+      - MYSQL_PORT=${MYSQL_PORT}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+    volumes:
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - backend
+
+  php:
+    image: startrek-payroll-php
+    container_name: startrek-payroll-php
+    restart: unless-stopped
+    build:
+      context: php
+      dockerfile: Dockerfile
+    depends_on:
+      - mysql
+    environment:
+      - MYSQL_PORT=${MYSQL_PORT}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+    volumes:
+      - ./app:/app
+    networks:
+      - backend
+
+  nginx:
+    image: startrek-payroll-nginx
+    container_name: startrek-payroll-nginx
+    restart: unless-stopped
+    build:
+      context: nginx
+      dockerfile: Dockerfile
+    depends_on:
+      - mysql
+      - php
+    ports:
+      - "8080:80"
+    volumes:
+      - ./app:/app
+      - ./nginx/site.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - frontend
+      - backend
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge

@@ -1,0 +1,15 @@
+services:
+  {{name}}:
+    image: {{ image }}
+    container_name: ${LABID}_{{name}}
+    {% if env %}
+    environment:
+    {% for key, value in env.items() %}
+          {{ key }}: "{{ value }}"
+    {% endfor %}
+    {% endif %}
+    tty: {{tty}}
+    restart: {{restart_policy}}
+    networks:
+      - ${LABID}
+ 
