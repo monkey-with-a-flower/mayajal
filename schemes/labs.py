@@ -12,4 +12,4 @@ class GetLab(BaseModel):
 class CreateLab(BaseModel):
     name: str
     description: str | None
-    machines: dict[str,Any] 
+    machines: list[str] 

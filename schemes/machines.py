@@ -3,7 +3,7 @@ from typing import Literal,Optional
 
 
 
-restartPolicy = Literal["Never","Always","On failure", "Unless stopped"]
+restartPolicy = Literal["no","always","on-failure", "unless-stopped"]
 osTypes = Literal["Linux","Windows","Others"]
 
 
@@ -18,7 +18,7 @@ class CreateMachine(BaseModel):
     imageUrl: str
     volumes:Optional[dict[str,str]] = None
     env: Optional[dict[str,str]] = None
-    restart_policy: Optional[restartPolicy] = "Unless stopped"
+    restart_policy: Optional[restartPolicy] = "unless-stopped"
     commands: Optional[dict[str,str] ] = None
     console: Optional[bool ] = True
     name: str

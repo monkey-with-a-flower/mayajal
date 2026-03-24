@@ -1,12 +1,17 @@
+from pathlib import Path
+
 from fastapi import APIRouter,HTTPException,status, Depends
 from sqlalchemy.orm import Session
+from api.config import ASSETS_DIR, LAB_DIR
 from api.get_current_user import get_current_user
 from api.db import get_db
 from api.models.labs import Lab
+from api.models.machines import Machine
 from api.models.users import User
-from api.schemes.labs import CreateLab,GetLab,GetLabs
-
-
+from api.schemes.labs import CreateLab
+from api.services.labs import startLab
+import os
+from jinja2 import Template
 router = APIRouter()
 
    
@@ -14,15 +19,30 @@ router = APIRouter()
 def createLab(payload:CreateLab,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
     if payload:
         try: 
+            machines = []
+            for machine in payload.machines:
+                print (machine)
+                machines.append(db.query(Machine).filter(Machine.id == machine).first())
             lab = Lab(
                 name = payload.name,
                 description = payload.description,
-                machines = payload.machines,
+                machines = machines,
                 owner_id = current_user.id
             )
             db.add(lab)
             db.commit()
             db.refresh(lab)
+            labdir = Path(f"{LAB_DIR}/{lab.id}")
+            labdir.mkdir(parents= True,exist_ok=False)
+            envTemplate = Template(Path(f"{ASSETS_DIR}/env.j2").read_text())
+            env = envTemplate.render(
+                LABID = lab.id,
+                PEERS = lab.owner_id,
+                MASTERURL = "192.168.1.14",
+                LABPORT = "51820"
+            )
+            Path(f"{labdir}/.env").write_text(env)
+            return lab
         except Exception as e:
             db.rollback()
             raise HTTPException (
@@ -90,6 +110,27 @@ def deleteLab(labId: str,db:Session = Depends(get_db),current_user:User = Depend
             lab = db.query(Lab).filter(Lab.owner_id == current_user.id).first()
             db.delete(lab)
             db.commit()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e)
+            )
+        
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
+    
+
+
+
+
+@router.get("/{labId}/start")
+def stratlab(labId: str,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
+    if labId:
+        try:
+            lab = db.query(Lab).filter(Lab.owner_id == current_user.id).first()
+            return startLab(lab=lab)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

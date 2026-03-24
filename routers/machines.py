@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends,HTTPException, status
 from sqlalchemy.orm import Session
 
+from api.config import ASSETS_DIR, MACHINE_DIR
 from api.db import get_db
 from api.get_current_user import get_current_user
 from api.models.machines import Machine
 from api.models.users import User
 from api.schemes.machines import CreateMachine
-
+from pathlib import Path
+from jinja2 import Template
 
 router = APIRouter()
 
@@ -40,6 +42,21 @@ def createMachine(payload:CreateMachine, db:Session = Depends(get_db)):
     try:
         db.add(machine)
         db.commit()
+        template_path = Path(f"{ASSETS_DIR}/machine_template.yml.j2")
+        output_path = Path(f"{MACHINE_DIR}/{machine.id}.yml")
+        template = Template(template_path.read_text())
+        rendered = template.render(
+            image = machine.imageUrl,
+            name = machine.name,
+            env = machine.env,
+            restart_policy = machine.restart_policy,
+            commands = machine.commands,
+            tty = str(machine.console).lower()
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(rendered)    
+
+
     except Exception as e:
         db.rollback()
         raise HTTPException(HTTPException(
@@ -95,3 +112,4 @@ def deleteMachine(machineID: str,db:Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST
         )
+    
