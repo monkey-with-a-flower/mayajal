@@ -9,7 +9,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Australia/Sydney
-      - SERVERURL=${MASTERURl}
+      - SERVERURL=${MASTERURL}
       - SERVERPORT=${LABPORT}
       - PEERS=${PEERS}
       - PEERDNS=1.1.1.1
@@ -23,7 +23,7 @@ services:
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     networks:
-      - ${LABID}
+      - lab_net
     restart: unless-stopped
 
   suricata:
@@ -38,11 +38,11 @@ services:
     #   - ./custom-data:/custom-data
     command: ["-i", "eth0", "-c", "/etc/suricata/suricata.yaml", "-v"]
     networks:
-      - ${LABID}
+      - lab_net
     restart: unless-stopped
 
 networks:
   lab_net:
-    name: ${LAB_ID}
+    name: ${LABID}
     driver: bridge
     internal: true
