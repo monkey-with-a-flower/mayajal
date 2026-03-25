@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter,HTTPException,status, Depends
-from fastapi.responses import StreamingResponse,FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from api.config import ASSETS_DIR, LAB_DIR
 from api.get_current_user import get_current_user
@@ -10,7 +10,7 @@ from api.models.labs import Lab
 from api.models.machines import Machine
 from api.models.users import User
 from api.schemes.labs import CreateLab
-from api.services.labs import getPeerConfig, startLab
+from api.services.labs import getPeerConfig, startLab,stop
 from jinja2 import Template
 router = APIRouter()
 
@@ -149,3 +149,8 @@ def getConfig(labId: str, db: Session = Depends(get_db)):
         return getPeerConfig(lab)
     except Exception as e:
        return e
+    
+@router.get("/{labId}/stop")
+def stopLab(labId:str):
+   return stop(labId)
+    
