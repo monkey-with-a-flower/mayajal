@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter,HTTPException,status, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from api.config import ASSETS_DIR, LAB_DIR
 from api.get_current_user import get_current_user
@@ -128,8 +129,8 @@ def deleteLab(labId: str,db:Session = Depends(get_db),current_user:User = Depend
 def stratlab(labId: str,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
     if labId:
         try:
-            lab = db.query(Lab).filter(Lab.owner_id == current_user.id and Lab.id == labId).first()
-            return startLab(lab=lab)
+            lab = db.query(Lab).filter(Lab.id == labId).first()
+            return StreamingResponse(startLab(lab=lab),media_type="text/plain")
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
