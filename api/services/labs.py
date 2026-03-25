@@ -14,8 +14,7 @@ def getPeerConfig(lab: Lab):
         media_type="application/octet-stream"
     )
 
-
-def startLab(lab: Lab):
+async def startLab(lab: Lab):
     labdir = Path(f"{LAB_DIR}/{lab.id}")
 
     command = ["docker-compose", "-f", f"{ASSETS_DIR}/base_compose.yml"]
@@ -31,11 +30,15 @@ def startLab(lab: Lab):
     ])
 
     try:
-        streamProcess(command)
-
+        async for chunk in streamProcess(command):
+            yield chunk
     except Exception as e:
         yield f"Error: {str(e)}\n"
-
-def stop(labId:str):
-    command = ["docker-compose","-p",labId,"down"]
-    streamProcess(command)
+        
+async def stop(labId: str):
+    command = ["docker-compose", "-p", labId, "down"]
+    try:
+        async for chunk in streamProcess(command):
+            yield chunk
+    except Exception as e:
+        yield f"Error: {str(e)}\n"
