@@ -2,8 +2,6 @@ import asyncio
 
 
 async def streamProcess(command:list[str]):
-
-
     process = await asyncio.create_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,

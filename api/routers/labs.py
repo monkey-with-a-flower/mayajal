@@ -152,5 +152,5 @@ def getConfig(labId: str, db: Session = Depends(get_db)):
     
 @router.get("/{labId}/stop")
 def stopLab(labId:str):
-   return stop(labId)
+   return StreamingResponse(stop(labId),media_type="plain/text")
     
