@@ -31,7 +31,7 @@ async def startLab(lab: Lab):
     command.append("-d")
     try:
         print (command)
-        result = asyncio.create_subprocess_exec(command,stdout=asyncio.subprocess.PIPE,
+        result = await asyncio.create_subprocess_exec(command,stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT)
         while True:
             line = await result.stdout.readline()
