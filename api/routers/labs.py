@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter,HTTPException,status, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse,FileResponse
 from sqlalchemy.orm import Session
 from api.config import ASSETS_DIR, LAB_DIR
 from api.get_current_user import get_current_user
@@ -10,7 +10,7 @@ from api.models.labs import Lab
 from api.models.machines import Machine
 from api.models.users import User
 from api.schemes.labs import CreateLab
-from api.services.labs import startLab
+from api.services.labs import getPeerConfig, startLab
 from jinja2 import Template
 router = APIRouter()
 
@@ -126,7 +126,7 @@ def deleteLab(labId: str,db:Session = Depends(get_db),current_user:User = Depend
 
 
 @router.get("/{labId}/start")
-def stratlab(labId: str,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
+def stratlab(labId: str,db:Session = Depends(get_db)):
     if labId:
         try:
             lab = db.query(Lab).filter(Lab.id == labId).first()
@@ -141,3 +141,11 @@ def stratlab(labId: str,db:Session = Depends(get_db),current_user:User = Depends
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST
         )
+    
+@router.get("/{labId}/config")
+def getConfig(labId: str, db: Session = Depends(get_db)):
+    lab = db.query(Lab).filter(Lab.id == labId).first()
+    try:
+        return FileResponse(getPeerConfig(lab),media_type="application/octet-stream",filename="peer_config.conf")
+    except Exception as e:
+       return e
