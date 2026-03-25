@@ -1,4 +1,4 @@
-import asyncio
+from api.services.streamingResponse import streamProcess
 from pathlib import Path
 from fastapi.responses import FileResponse
 from api.config import ASSETS_DIR, LAB_DIR, MACHINE_DIR
@@ -15,7 +15,7 @@ def getPeerConfig(lab: Lab):
     )
 
 
-async def startLab(lab: Lab):
+def startLab(lab: Lab):
     labdir = Path(f"{LAB_DIR}/{lab.id}")
 
     command = ["docker-compose", "-f", f"{ASSETS_DIR}/base_compose.yml"]
@@ -31,23 +31,11 @@ async def startLab(lab: Lab):
     ])
 
     try:
-        print(command)
-
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            yield line.decode()
-
-        return_code = await process.wait()
-        if return_code != 0:
-            yield f"\nProcess exited with code {return_code}\n"
+        streamProcess(command)
 
     except Exception as e:
         yield f"Error: {str(e)}\n"
+
+def stop(labId:str):
+    command = ["docker-compose","-p",labId,"down"]
+    streamProcess(command)
