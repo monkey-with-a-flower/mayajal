@@ -1,9 +1,13 @@
 from pathlib import Path
-
+from fastapi .responses import FileResponse
 from api.config import ASSETS_DIR, LAB_DIR, MACHINE_DIR
-from api.db import get_db
 from api.models.labs import Lab
 import subprocess
+
+def getPeerConfig(ownerID: str,labDir: Path):
+    config = Path(f"{labDir}/config/wireguard/peer_{ownerID}/peer_{ownerID}.conf")
+    return FileResponse(path=config, filename="peer_config.conf", media_type="application/octet-stream")
+
 
 
 def startLab(lab: Lab):
@@ -22,11 +26,9 @@ def startLab(lab: Lab):
     try:
         print (command)
         result = subprocess.run(command,capture_output=True, text=True,check=False)
-        return {
-            "stdout":result.stdout,
-            "stderr":result.stderr,
-            "returncode":result.returncode,
-        }
+        return getPeerConfig(
+            lab.owner_id,labdir
+        )
     except subprocess.CalledProcessError as e:
         print("Error:", e.stderr)
     

@@ -1,0 +1,26 @@
+services:
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: test_wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Australia/Sydney
+      - SERVERURL=192.168.1.14
+      - SERVERPORT=51820
+      - PEERS=sakar
+      - PEERDNS=1.1.1.1
+      - INTERNAL_SUBNET=10.13.13.0/24
+      # - ALLOWEDIPS=${LAB_SUBNET},${WG_SUBNET}
+    volumes:
+      - ./config/wireguard:/config
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "51820:51820/udp"
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+
