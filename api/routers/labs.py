@@ -128,7 +128,7 @@ def deleteLab(labId: str,db:Session = Depends(get_db),current_user:User = Depend
 def stratlab(labId: str,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
     if labId:
         try:
-            lab = db.query(Lab).filter(Lab.owner_id == current_user.id).first()
+            lab = db.query(Lab).filter(Lab.owner_id == current_user.id and Lab.id == labId).first()
             return startLab(lab=lab)
         except Exception as e:
             raise HTTPException(
