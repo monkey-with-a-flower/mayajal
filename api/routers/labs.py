@@ -122,25 +122,31 @@ def deleteLab(labId: str,db:Session = Depends(get_db),current_user:User = Depend
         )
     
 
-
-
-
 @router.get("/{labId}/start")
-def stratlab(labId: str,db:Session = Depends(get_db)):
-    if labId:
-        try:
-            lab = db.query(Lab).filter(Lab.id == labId).first()
-            return StreamingResponse(startLab(lab=lab),media_type="text/plain")
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(e)
-            )
+async def start_lab(labId: str, db: Session = Depends(get_db)):
+    lab = db.query(Lab).filter(Lab.id == labId).first()
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab not found")
+
+    return StreamingResponse(startLab(lab), media_type="text/plain")
+
+
+# @router.get("/{labId}/start")
+# def stratlab(labId: str,db:Session = Depends(get_db)):
+#     if labId:
+#         try:
+#             lab = db.query(Lab).filter(Lab.id == labId).first()
+#             return StreamingResponse(startLab(lab=lab),media_type="text/plain")
+#         except Exception as e:
+#             raise HTTPException(
+#                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#                 detail=str(e)
+#             )
         
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST
-        )
+#     else:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST
+#         )
     
 @router.get("/{labId}/config")
 def getConfig(labId: str, db: Session = Depends(get_db)):
@@ -151,6 +157,5 @@ def getConfig(labId: str, db: Session = Depends(get_db)):
        return e
     
 @router.get("/{labId}/stop")
-def stopLab(labId:str):
-   return StreamingResponse(stop(labId),media_type="plain/text")
-    
+async def stopLab(labId: str):
+    return StreamingResponse(stop(labId), media_type="text/plain")
