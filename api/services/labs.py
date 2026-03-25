@@ -5,8 +5,9 @@ from api.config import ASSETS_DIR, LAB_DIR, MACHINE_DIR
 from api.models.labs import Lab
 
 
-def getPeerConfig(labDir: Path):
-    config = Path(f"{labDir}/config/wireguard/peer_peer1/peer_peer1.conf")
+def getPeerConfig(lab: Lab):
+    labdir = Path(f"{LAB_DIR}/{lab.id}")
+    config = Path(f"{labdir}/config/wireguard/peer_peer1/peer_peer1.conf")
     return FileResponse(
         path=config,
         filename="peer_config.conf",
@@ -47,7 +48,6 @@ async def startLab(lab: Lab):
         return_code = await process.wait()
         if return_code != 0:
             yield f"\nProcess exited with code {return_code}\n"
-        getPeerConfig(labdir)
 
     except Exception as e:
         yield f"Error: {str(e)}\n"
