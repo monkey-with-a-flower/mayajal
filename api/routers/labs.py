@@ -146,6 +146,6 @@ def stratlab(labId: str,db:Session = Depends(get_db)):
 def getConfig(labId: str, db: Session = Depends(get_db)):
     lab = db.query(Lab).filter(Lab.id == labId).first()
     try:
-        return FileResponse(getPeerConfig(lab),media_type="application/octet-stream",filename="peer_config.conf")
+        return getPeerConfig(lab)
     except Exception as e:
        return e
