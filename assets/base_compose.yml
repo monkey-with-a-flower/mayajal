@@ -16,7 +16,7 @@ services:
       - INTERNAL_SUBNET=10.13.13.0/24
       # - ALLOWEDIPS=${LAB_SUBNET},${WG_SUBNET}
     volumes:
-      - /Users/sakarmahat/Containers/mayajal/labs/${LABID}/config/wireguard:/config
+      - /opt/mayajal/labs/${LABID}/config/wireguard:/config
       - /lib/modules:/lib/modules:ro
     ports:
       - "${LABPORT}:51820/udp"
