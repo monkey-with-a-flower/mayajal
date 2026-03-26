@@ -14,7 +14,7 @@ services:
       - PEERS=peer1
       - PEERDNS=1.1.1.1
       - INTERNAL_SUBNET=10.13.13.0/24
-      # - ALLOWEDIPS=${LAB_SUBNET},${WG_SUBNET}
+      - ALLOWEDIPS=10.13.13.0/24,172.30.20.0/24
     volumes:
       - /opt/mayajal/labs/${LABID}/config/wireguard:/config
       - /lib/modules:/lib/modules:ro
@@ -48,4 +48,4 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.30.10.0/24
+        - subnet: 172.30.20.0/24
