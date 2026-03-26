@@ -46,4 +46,6 @@ networks:
   lab_net:
     name: ${LABID}
     driver: bridge
-    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
