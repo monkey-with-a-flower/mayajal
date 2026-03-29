@@ -11,10 +11,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Deploy Via SSH
-        uses: appleboy/ssh-action
+        uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.SSH_HOST }}
-          username: root
+          username: ubuntu
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd ~/mayajal
