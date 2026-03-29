@@ -20,4 +20,5 @@ jobs:
             cd ~/mayajal
             git pull
             cd ./api
+            uv sync --active
             uv run fastapi dev main.py --host 0.0.0.0
