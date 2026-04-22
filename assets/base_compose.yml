@@ -28,13 +28,13 @@ services:
     restart: unless-stopped
 
   suricata:
-    image: jasonish/suricata:latest
+    image: suricata:loaded
     container_name: ${LABID}_suricata
     cap_add:
       - NET_ADMIN
-    # volumes:
-    #   - ./config/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
-    #   - ./logs/suricata:/var/log/suricata
+    volumes:
+      - ./config/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - /opt/mayajal/labs/${LABID}/logs/suricata:/var/log/suricata
     #   - ./rules:/var/lib/suricata/rules
     #   - ./custom-data:/custom-data
     command: ["-i", "eth0", "-c", "/etc/suricata/suricata.yaml", "-v"]

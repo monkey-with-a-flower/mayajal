@@ -1,0 +1,341 @@
+%YAML 1.1
+---
+# =============================================================================
+# Suricata 7.x — Full visibility config
+# Optimised for: flow recording + HTTP/DNS/TLS/SMB app-layer logging
+#                + SQLi / recon detection rules
+# No alerts required to capture traffic. Rules are additive on top.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. NETWORK INTERFACE
+# Change "eth0" to your actual capture interface (ip -br link)
+# -----------------------------------------------------------------------------
+af-packet:
+  - interface: eth0
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+    tpacket-v3: yes
+    ring-size: 2048
+    block-size: 32768
+    threads: auto
+
+# -----------------------------------------------------------------------------
+# 2. EVE-JSON OUTPUTS — this is what was broken in your setup
+#    Every event_type here is written to eve.json with ZERO rules needed.
+#    Rules only add "alert" event_type on top.
+# -----------------------------------------------------------------------------
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: /var/log/suricata/eve.json
+
+      # Rotate daily and keep 30 days
+      rotate-interval: day
+      pcap-file: false
+
+      types:
+        # ---- FLOWS (what you already had) -----------------------------------
+        - flow:
+            enabled: yes
+
+        # ---- HTTP (was missing — needed for Burp/sqlmap visibility) ---------
+        - http:
+            enabled: yes
+            extended: yes          # logs User-Agent, referrer, request body size
+            custom: [accept, accept-charset, accept-encoding, accept-language,
+                     authorization, cookie, content-type, content-length,
+                     x-forwarded-for, x-requested-with]
+
+        # ---- DNS (needed to see host resolution during recon) ---------------
+        - dns:
+            enabled: yes
+            version: 2             # structured query + answer in same record
+
+        # ---- TLS (metadata even without decryption) -------------------------
+        - tls:
+            enabled: yes
+            extended: yes          # logs SNI, JA3, JA3S fingerprints
+
+        # ---- SSH (logs banner / hassh fingerprint) --------------------------
+        - ssh:
+            enabled: yes
+
+        # ---- SMB (lateral movement visibility) ------------------------------
+        - smb:
+            enabled: yes
+
+        # ---- DCERPC ---------------------------------------------------------
+        - dcerpc:
+            enabled: yes
+
+        # ---- FTP ------------------------------------------------------------
+        - ftp:
+            enabled: yes
+
+        # ---- SMTP -----------------------------------------------------------
+        - smtp:
+            enabled: yes
+            extended: yes
+
+        # ---- FILES detected over HTTP/FTP/SMTP ------------------------------
+        - files:
+            enabled: yes
+            force-magic: yes       # MIME type detection on all files
+            force-hash: [md5, sha256]
+
+        # ---- ALERTS (rules-based, zero rules = zero alerts, that is ok) -----
+        - alert:
+            enabled: yes
+            payload: yes           # base64 payload in alert record
+            payload-printable: yes
+            packet: yes
+            metadata: yes
+            http-body: yes
+            http-body-printable: yes
+
+
+        # ---- STATS ----------------------------------------------------------
+        - stats:
+            enabled: yes
+            totals: yes
+            threads: yes
+            deltas: yes
+
+        # ---- ANOMALY (malformed packets, proto violations) ------------------
+        - anomaly:
+            enabled: yes
+            types:
+              decode: yes
+              stream: yes
+              applayer: yes
+
+# -----------------------------------------------------------------------------
+# 3. APP-LAYER PROTOCOL DETECTION
+#    Suricata auto-detects protocols on any port.
+#    "enabled: yes" on http means it will parse HTTP on 8080, 8443 etc.
+# -----------------------------------------------------------------------------
+app-layer:
+  protocols:
+    http:
+      enabled: yes
+      memcap: 64mb
+      # Detect HTTP on non-standard ports (8080, 8000, etc.)
+      detection-ports:
+        dp: 80, 8080, 8000, 8008, 8443, 8888, 3000, 5000
+    http2:
+      enabled: yes
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443, 8443
+      ja3-fingerprints: yes
+      ja4-fingerprints: yes      # requires Suricata >= 7.0.4
+    dns:
+      tcp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+      udp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+    ftp:
+      enabled: yes
+    ssh:
+      enabled: yes
+    smtp:
+      enabled: yes
+    imap:
+      enabled: yes
+    smb:
+      enabled: yes
+    dcerpc:
+      enabled: yes
+    krb5:
+      enabled: yes
+    snmp:
+      enabled: yes
+    rdp:
+      enabled: yes
+    mysql:
+      enabled: yes              # logs queries — critical for SQLi visibility
+    postgresql:
+      enabled: yes
+    dnp3:
+      enabled: yes
+      detection-enabled: yes
+
+    modbus:
+      enabled: yes
+      detection-enabled: yes
+
+# -----------------------------------------------------------------------------
+# 4. STREAM / REASSEMBLY
+#    Without this, Suricata only sees individual packets, not full sessions.
+#    sqlmap sends multi-packet payloads — reassembly makes them visible.
+# -----------------------------------------------------------------------------
+stream:
+  memcap: 256mb
+  checksum-validation: no      # set to "no" in lab/pentest environments
+  reassembly:
+    memcap: 256mb
+    depth: 0                   # 0 = unlimited reassembly depth (captures full dumps)
+    toserver-chunk-size: 2560
+    toclient-chunk-size: 2560
+    randomize-chunk-size: no
+
+# -----------------------------------------------------------------------------
+# 5. DETECTION ENGINE + RULES
+#    You do NOT need rules to log traffic.
+#    Rules only add alert events. Add them for detection on top of logging.
+# -----------------------------------------------------------------------------
+detect:
+  profile: high
+  custom-values:
+    toclient-groups: 3
+    toserver-groups: 25
+
+
+default-rule-path: /var/lib/suricata/rules
+
+rule-files:
+  - suricata.rules
+
+# rule-files:
+#   - suricata.rules
+  # Place your .rules files here. Examples:
+  # - /etc/suricata/rules/suricata.rules          # default Suricata rules
+  # - /etc/suricata/rules/emerging-web.rules      # ET Open web attack rules
+  # - /etc/suricata/rules/custom-recon.rules      # your own rules (see below)
+
+  # To download ET Open rules:
+  #   suricata-update
+  # or:
+  #   suricata-update add-source et/open
+  #   suricata-update update-sources
+  #   suricata-update
+
+# -----------------------------------------------------------------------------
+# 6. CUSTOM DETECTION RULES FOR YOUR ATTACK CHAIN
+#    Save these to /etc/suricata/rules/custom-recon.rules
+#    and add that path to rule-files above.
+#
+#    IMPORTANT: Rules fire alerts — they do NOT affect what gets logged.
+#    HTTP/DNS/TLS will be logged regardless of whether these rules match.
+# -----------------------------------------------------------------------------
+
+# --- Paste the following into /etc/suricata/rules/custom-recon.rules ---
+#
+# Port scan burst (>200 closed TCP connections from same IP in 60s)
+# alert tcp any any -> $HOME_NET any (msg:"RECON Port Scan Burst"; \
+#   flags:S; threshold: type threshold, track by_src, count 200, seconds 60; \
+#   sid:9001; rev:1;)
+#
+# ICMP ping sweep
+# alert icmp any any -> $HOME_NET any (msg:"RECON ICMP Ping Sweep"; \
+#   itype:8; threshold: type threshold, track by_src, count 5, seconds 10; \
+#   sid:9002; rev:1;)
+#
+# sqlmap User-Agent (requires HTTP logging enabled above)
+# alert http any any -> $HOME_NET any (msg:"EXPLOIT sqlmap detected"; \
+#   http.user_agent; content:"sqlmap"; nocase; \
+#   sid:9003; rev:1;)
+#
+# SQL UNION SELECT injection attempt
+# alert http any any -> $HOME_NET any (msg:"EXPLOIT SQL UNION SELECT injection"; \
+#   http.uri; content:"UNION"; nocase; content:"SELECT"; nocase; distance:0; \
+#   sid:9004; rev:1;)
+#
+# SQL error-based injection
+# alert http any any -> $HOME_NET any (msg:"EXPLOIT SQL error-based injection"; \
+#   http.uri; content:"' OR "; nocase; \
+#   sid:9005; rev:1;)
+#
+# Large server response after SQL probe (possible data dump)
+# alert http $HOME_NET any -> any any (msg:"EXFIL Large HTTP response post-attack"; \
+#   http.response_body; content:"|7b|"; \
+#   threshold: type threshold, track by_dst, count 1, seconds 1; \
+#   sid:9006; rev:1;)
+#
+# Nmap default User-Agent
+# alert http any any -> $HOME_NET any (msg:"RECON Nmap HTTP probe"; \
+#   http.user_agent; content:"Nmap Scripting Engine"; \
+#   sid:9007; rev:1;)
+#
+# Burp Suite default User-Agent
+# alert http any any -> $HOME_NET any (msg:"RECON Burp Suite detected"; \
+#   http.user_agent; content:"Burp"; nocase; \
+#   sid:9008; rev:1;)
+
+# -----------------------------------------------------------------------------
+# 7. HOME NETWORK DEFINITION
+#    Adjust to match your lab subnet.
+# -----------------------------------------------------------------------------
+vars:
+  address-groups:
+    HOME_NET: "[172.30.20.0/24]"
+    EXTERNAL_NET: "!$HOME_NET"
+    HTTP_SERVERS: "$HOME_NET"
+    SQL_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+  port-groups:
+    HTTP_PORTS: "80, 8080, 8000, 8008, 8443, 3000, 5000"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+
+# -----------------------------------------------------------------------------
+# 8. PERFORMANCE TUNING
+# -----------------------------------------------------------------------------
+max-pending-packets: 1024
+
+threading:
+  set-cpu-affinity: no
+  cpu-affinity:
+    - management-cpu-set:
+        cpu: [ 0 ]
+    - receive-cpu-set:
+        cpu: [ 0 ]
+    - worker-cpu-set:
+        cpu: [ "all" ]
+        mode: "exclusive"
+  detect-thread-ratio: 1.0
+
+# -----------------------------------------------------------------------------
+# 9. LOGGING (Suricata's own operational log, separate from eve.json)
+# -----------------------------------------------------------------------------
+logging:
+  default-log-level: notice
+  default-output-filter:
+  outputs:
+    - console:
+        enabled: yes
+    - file:
+        enabled: yes
+        level: info
+        filename: /var/log/suricata/suricata.log
+
+# -----------------------------------------------------------------------------
+# 10. PCAP LOGGING (optional — full packet capture)
+#     Uncomment if you want full PCAP alongside eve.json.
+#     Warning: disk-intensive. Use pcap-log for targeted capture.
+# -----------------------------------------------------------------------------
+# outputs:
+#   - pcap-log:
+#       enabled: yes
+#       filename: /var/log/suricata/log.pcap
+#       limit: 1gb
+#       max-files: 10
+#       compression: none
+#       mode: multi            # rotate files automatically
+
+# -----------------------------------------------------------------------------
+# 11. UNIX SOCKET (for suricatasc live control)
+# -----------------------------------------------------------------------------
+unix-command:
+  enabled: yes
+  filename: /var/run/suricata/suricata-command.socket
