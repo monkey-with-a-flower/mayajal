@@ -1,8 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from api.db import Base,engine
-from api.get_current_user import get_current_user
+from api.db import Base, engine
 from api.routers.labs import router as labRouter
 from api.routers.machines import router as machinesRouter
 from api.routers.users import router as usersRouter
@@ -14,10 +13,13 @@ from api.routers.users import router as usersRouter
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    get_current_user()
     yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Mayajal API",
+    description="Manage users, vulnerable machines, and isolated security labs.",
+    lifespan=lifespan,
+)
 
 
 app.include_router( labRouter, prefix="/labs",tags=["Labs"])

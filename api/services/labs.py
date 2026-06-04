@@ -8,6 +8,8 @@ from api.models.labs import Lab
 def getPeerConfig(lab: Lab):
     labdir = Path(f"{LAB_DIR}/{lab.id}")
     config = Path(f"{labdir}/config/wireguard/peer_peer1/peer_peer1.conf")
+    if not config.is_file():
+        raise FileNotFoundError("Peer configuration is not available. Start the lab first.")
     return FileResponse(
         path=config,
         filename="peer_config.conf",

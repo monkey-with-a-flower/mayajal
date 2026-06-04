@@ -14,15 +14,24 @@ from api.services.labs import getPeerConfig, startLab,stop
 from jinja2 import Template
 router = APIRouter()
 
-   
+
+def resolve_machines(machine_ids: list[str], db: Session) -> list[Machine]:
+    machines = db.query(Machine).filter(Machine.id.in_(machine_ids)).all()
+    found_ids = {machine.id for machine in machines}
+    missing_ids = [machine_id for machine_id in machine_ids if machine_id not in found_ids]
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown machine IDs: {', '.join(missing_ids)}",
+        )
+    return machines
+
+
 @router.post("/",status_code=status.HTTP_201_CREATED)
 def createLab(payload:CreateLab,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
     if payload:
+        machines = resolve_machines(payload.machines, db)
         try: 
-            machines = []
-            for machine in payload.machines:
-                print (machine)
-                machines.append(db.query(Machine).filter(Machine.id == machine).first())
             lab = Lab(
                 name = payload.name,
                 description = payload.description,
@@ -30,8 +39,7 @@ def createLab(payload:CreateLab,db:Session = Depends(get_db),current_user:User =
                 owner_id = current_user.id
             )
             db.add(lab)
-            db.commit()
-            db.refresh(lab)
+            db.flush()
             labdir = Path(f"{LAB_DIR}/{lab.id}")
             labdir.mkdir(parents= True,exist_ok=False)
             envTemplate = Template(Path(f"{ASSETS_DIR}/env.j2").read_text())
@@ -42,6 +50,8 @@ def createLab(payload:CreateLab,db:Session = Depends(get_db),current_user:User =
                 LABPORT = "51820"
             )
             Path(f"{labdir}/.env").write_text(env)
+            db.commit()
+            db.refresh(lab)
             return lab
         except Exception as e:
             db.rollback()
@@ -71,26 +81,25 @@ def getLabs(db:Session = Depends(get_db), current_user:User = Depends(get_curren
 
 @router.get("/{labId}",status_code=status.HTTP_200_OK)
 def getLab(labId: str, db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
-    try:
-        lab = db.query(Lab).filter(Lab.id == labId and Lab.owner_id == current_user.id).first()
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            details= "Lab not found"
-        )
+    lab = db.query(Lab).filter(Lab.id == labId, Lab.owner_id == current_user.id).first()
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
     return lab
 
 @router.patch("/{labId}",status_code=status.HTTP_200_OK)
 def patchLab(labId,payload:CreateLab,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
     if payload:
         lab = db.query(Lab).filter(Lab.id == labId).first()
+        if lab is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
         if lab.owner_id == current_user.id:
             lab.name = payload.name
             lab.description = payload.description
-            lab.machines = payload.machines
+            lab.machines = resolve_machines(payload.machines, db)
             try: 
                 db.commit()
                 db.refresh(lab)
+                return lab
             except Exception as e:
                 db.rollback()
                 raise HTTPException (
@@ -106,8 +115,10 @@ def patchLab(labId,payload:CreateLab,db:Session = Depends(get_db),current_user:U
 @router.delete("/{labId}")
 def deleteLab(labId: str,db:Session = Depends(get_db),current_user:User = Depends(get_current_user)):
     if labId:
+        lab = db.query(Lab).filter(Lab.id == labId, Lab.owner_id == current_user.id).first()
+        if lab is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
         try:
-            lab = db.query(Lab).filter(Lab.owner_id == current_user.id).first()
             db.delete(lab)
             db.commit()
         except Exception as e:
@@ -120,11 +131,12 @@ def deleteLab(labId: str,db:Session = Depends(get_db),current_user:User = Depend
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST
         )
+    return {"deleted": labId}
     
 
 @router.get("/{labId}/start")
-async def start_lab(labId: str, db: Session = Depends(get_db)):
-    lab = db.query(Lab).filter(Lab.id == labId).first()
+async def start_lab(labId: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    lab = db.query(Lab).filter(Lab.id == labId, Lab.owner_id == current_user.id).first()
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
 
@@ -149,13 +161,18 @@ async def start_lab(labId: str, db: Session = Depends(get_db)):
 #         )
     
 @router.get("/{labId}/config")
-def getConfig(labId: str, db: Session = Depends(get_db)):
-    lab = db.query(Lab).filter(Lab.id == labId).first()
+def getConfig(labId: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    lab = db.query(Lab).filter(Lab.id == labId, Lab.owner_id == current_user.id).first()
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
     try:
         return getPeerConfig(lab)
     except Exception as e:
-       return e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     
 @router.get("/{labId}/stop")
-async def stopLab(labId: str):
+async def stopLab(labId: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    lab = db.query(Lab).filter(Lab.id == labId, Lab.owner_id == current_user.id).first()
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
     return StreamingResponse(stop(labId), media_type="text/plain")

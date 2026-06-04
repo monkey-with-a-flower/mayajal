@@ -1,21 +1,15 @@
-from fastapi import Depends, HTTPException,status
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from api.db import get_db
 from api.models.users import User
 
 
-def get_current_user(db:Session = Depends(get_db)):
-
-
-    try:
-        current_user: User = db.query(User).first()
-
-    except Exception as e:
+def get_current_user(db: Session = Depends(get_db)):
+    current_user = db.query(User).first()
+    if current_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            detail="Create a user before managing labs.",
         )
-    
-    yield current_user
-    
+    return current_user

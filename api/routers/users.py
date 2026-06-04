@@ -9,7 +9,7 @@ from api.get_current_user import get_current_user
 
 router = APIRouter()
 
-@router.post("/")
+@router.post("/", status_code=status.HTTP_201_CREATED)
 def createUser(payload:ModifyUser, db:Session = Depends(get_db)):
     if payload:
         user = User(
@@ -19,6 +19,7 @@ def createUser(payload:ModifyUser, db:Session = Depends(get_db)):
         try: 
             db.add(user)
             db.commit()
+            db.refresh(user)
         except Exception as e:
             raise HTTPException(
                 status_code= status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -54,11 +55,14 @@ def updateUser(payload: ModifyUser , db: Session =Depends(get_db), current_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST
         )
+    return current_user
     
 @router.delete("/{userId}")
 def deleteUser(userId: str, db:Session = Depends(get_db), current_user = Depends(get_current_user)):
     if userId:
         user = db.query(User).filter(User.id == userId).first()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         try: 
             db.delete(user)
             db.commit()
@@ -72,3 +76,4 @@ def deleteUser(userId: str, db:Session = Depends(get_db), current_user = Depends
         raise HTTPException(
             status_code= status.HTTP_400_BAD_REQUEST
         )
+    return {"deleted": userId}
