@@ -1,16 +1,21 @@
-# Mayajal Streamlit UI
+# Mayajal UI
 
-The dashboard covers the API's user, machine, and lab CRUD operations, streams
-lab start/stop output, downloads WireGuard configuration, and runs the local
-Suricata correlation report.
+## Local development
 
-From the repository root:
+Start the fixture API from the repository root:
 
-```bash
-uv run --project api uvicorn api.main:app --reload
-python -m pip install -r ui/requirements.txt
-streamlit run ui/main.py
-```
+    api/.venv/bin/python -m uvicorn api.test_backend:app --host 0.0.0.0 --port 8000
 
-The UI defaults to `http://127.0.0.1:8000` and lets you change the API URL in
-the sidebar.
+Start the frontend from this directory. Use the machine LAN address when opening it from another device:
+
+    MAYAJAL_API_URL=http://192.168.0.223:8000 npm run dev -- --hostname 0.0.0.0 --port 3000
+
+The frontend reads MAYAJAL_API_URL or NEXT_PUBLIC_API_URL when it starts, so the API endpoint can be configured independently.
+
+## Fixture accounts
+
+| Role | Username | Password |
+| --- | --- | --- |
+| Student | student.maya | Student!2026 |
+| Teacher | teacher.asha | Teacher!2026 |
+| Administrator | admin.samir | Admin!2026 |
