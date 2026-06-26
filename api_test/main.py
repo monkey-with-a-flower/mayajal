@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 from api_test.auth import get_current_user, require_roles
 from api_test.config import AUTH_MODE
 from api_test.database import Base, SessionLocal, engine, get_db
-from api_test.models import Lab, LabAssignment, LabStatus, Machine, Role, User
+from api_test.models import Lab, LabAssignment, LabStatus, Machine, Role, Scenario, SystemSetting, User
 from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, UserRead
 from api_test.services import require_lab_manager, require_student_access, start_session, stop_session
+from api_test.frontend_contract import router as frontend_router, user_payload
 
 DEV_PASSWORDS = {
     "student.maya": "Student!2026",
@@ -57,12 +58,27 @@ def seed_database() -> None:
                 db.add(Machine(name=name, image_url=image_url, os_type=os_type, description=description, created_by_id=admin.id))
         db.commit()
 
+        setting_specs = [
+            ("registration", "Student self-registration", False),
+            ("teacher_publish", "Teacher lab publishing", True),
+            ("machine_review", "Machine image approval", True),
+        ]
+        for setting_id, label, enabled in setting_specs:
+            if not db.get(SystemSetting, setting_id):
+                db.add(SystemSetting(id=setting_id, label=label, enabled=enabled))
+        db.commit()
+
         if not db.query(Lab).filter(Lab.name == "Web Exploit Basics").first():
             machines = db.query(Machine).filter(Machine.name.in_(["Kali Workstation", "DVWA"])).all()
             lab = Lab(name="Web Exploit Basics", description="Find and validate common web application weaknesses.", status=LabStatus.published, owner_id=teacher.id, machines=machines)
             db.add(lab)
             db.flush()
             db.add(LabAssignment(lab_id=lab.id, student_id=student.id, assigned_by_id=teacher.id))
+            db.commit()
+
+        if not db.query(Scenario).filter(Scenario.name == "Web observer practice", Scenario.student_id == student.id).first():
+            scenario_machines = db.query(Machine).filter(Machine.name.in_(["Kali Workstation", "DVWA"])).all()
+            db.add(Scenario(name="Web observer practice", student_id=student.id, machines=scenario_machines))
             db.commit()
     finally:
         db.close()
@@ -83,6 +99,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(frontend_router)
 
 
 @app.get("/health")
@@ -99,7 +116,7 @@ def dev_login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == payload.username).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Development user is unavailable.")
-    return {"access_token": "dev:" + user.username, "token_type": "bearer", "user": UserRead.model_validate(user)}
+    return {"access_token": "dev:" + user.username, "token_type": "bearer", "user": user_payload(user)}
 
 
 @app.get("/auth/me", response_model=UserRead)
@@ -192,13 +209,14 @@ def get_lab(lab_id: str, db: Session = Depends(get_db), user: User = Depends(get
     return read_lab(lab)
 
 
-@app.post("/labs/{lab_id}/start", response_model=LabSessionRead, status_code=status.HTTP_201_CREATED)
+@app.post("/labs/{lab_id}/start", status_code=status.HTTP_201_CREATED)
 def start_lab(lab_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
     lab = db.get(Lab, lab_id)
     if lab is None or lab.status != LabStatus.published:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published lab not found.")
     require_student_access(db, user, lab)
-    return start_session(db, lab, user)
+    session = start_session(db, lab, user)
+    return {"id": session.id, "lab_id": lab.id, "student_id": user.id, "status": session.status.value, "access_url": session.access_url, "started_at": session.started_at, "stopped_at": session.stopped_at, "message": lab.name + " is ready."}
 
 
 @app.post("/labs/{lab_id}/stop", response_model=LabSessionRead)

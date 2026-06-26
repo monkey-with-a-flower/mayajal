@@ -71,3 +71,16 @@ def test_teacher_assignment_controls_student_access(client: TestClient):
     assert private.status_code == 201
     assert client.get(f"/labs/{private.json()['id']}", headers=student).status_code == 403
     assert client.post("/labs", headers=student, json={"name": "Denied", "machine_ids": [machines[0]["id"]]}).status_code == 403
+
+
+def test_frontend_contract_uses_authenticated_core_data(client: TestClient):
+    login_response = client.post("/auth/login", json={"username": "student.maya", "password": "Student!2026"})
+    assert login_response.status_code == 200
+    assert login_response.json()["user"]["initials"] == "MP"
+    headers = {"Authorization": "Bearer " + login_response.json()["access_token"]}
+    dashboard = client.get("/student/dashboard", headers=headers)
+    assert dashboard.status_code == 200
+    machine_id = dashboard.json()["machines"][0]["id"]
+    scenario = client.post("/student/scenarios", headers=headers, json={"name": "UI contract scenario", "machine_ids": [machine_id]})
+    assert scenario.status_code == 201
+    assert scenario.json()["name"] == "UI contract scenario"

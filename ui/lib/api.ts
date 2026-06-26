@@ -49,6 +49,8 @@ export type LoginResult = {
   user: ApiUser;
 };
 
+let accessToken = "";
+
 function trimUrl(url: string) {
   return url.replace(/\/$/, "");
 }
@@ -56,7 +58,7 @@ function trimUrl(url: string) {
 async function request<T>(apiUrl: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(trimUrl(apiUrl) + path, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: { "Content-Type": "application/json", ...(accessToken ? { Authorization: "Bearer " + accessToken } : {}), ...init?.headers },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
@@ -65,11 +67,13 @@ async function request<T>(apiUrl: string, path: string, init?: RequestInit): Pro
   return response.json() as Promise<T>;
 }
 
-export function signIn(apiUrl: string, username: string, password: string) {
-  return request<LoginResult>(apiUrl, "/auth/login", {
+export async function signIn(apiUrl: string, username: string, password: string) {
+  const result = await request<LoginResult>(apiUrl, "/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
+  accessToken = result.access_token;
+  return result;
 }
 
 export function getStudentDashboard(apiUrl: string) {
