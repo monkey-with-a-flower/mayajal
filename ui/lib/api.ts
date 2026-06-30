@@ -25,6 +25,7 @@ export type ApiLab = {
   progress: number;
   next_step: string;
   machine_ids: string[];
+  tasks: string[];
 };
 
 export type ApiScenario = {
@@ -81,9 +82,17 @@ export function getStudentDashboard(apiUrl: string) {
 }
 
 export function startLab(apiUrl: string, labId: string) {
-  return request<{ lab_id: string; status: string; message: string; access_url: string }>(
+  return request<{ lab_id: string; status: string; message: string; wireguard_config: string; wireguard_filename: string }>(
     apiUrl,
     "/labs/" + labId + "/start",
+    { method: "POST" },
+  );
+}
+
+export function stopLab(apiUrl: string, labId: string) {
+  return request<{ lab_id: string; status: "stopped" | "running"; stopped_at: string | null }>(
+    apiUrl,
+    "/labs/" + labId + "/stop",
     { method: "POST" },
   );
 }
@@ -93,6 +102,17 @@ export function saveScenario(apiUrl: string, name: string, machineIds: string[])
     method: "POST",
     body: JSON.stringify({ name, machine_ids: machineIds }),
   });
+}
+
+export function updateScenario(apiUrl: string, scenarioId: string, name: string, machineIds: string[]) {
+  return request<ApiScenario>(apiUrl, "/student/scenarios/" + scenarioId, {
+    method: "PATCH",
+    body: JSON.stringify({ name, machine_ids: machineIds }),
+  });
+}
+
+export function deleteScenario(apiUrl: string, scenarioId: string) {
+  return request<{ id: string; message: string }>(apiUrl, "/student/scenarios/" + scenarioId, { method: "DELETE" });
 }
 
 
@@ -115,8 +135,27 @@ export function getTeacherDashboard(apiUrl: string) {
   return request<TeacherDashboard>(apiUrl, "/teacher/dashboard");
 }
 
-export function createTeacherLab(apiUrl: string, name: string) {
-  return request<ApiLab>(apiUrl, "/teacher/labs", { method: "POST", body: JSON.stringify({ name }) });
+export type TeacherLabInput = {
+  name: string;
+  description: string;
+  machine_ids: string[];
+  tasks: string[];
+  publish: boolean;
+};
+
+export function createTeacherLab(apiUrl: string, lab: TeacherLabInput) {
+  return request<ApiLab>(apiUrl, "/teacher/labs", { method: "POST", body: JSON.stringify(lab) });
+}
+
+export function updateTeacherLab(apiUrl: string, lab: Pick<ApiLab, "id" | "name" | "description" | "machine_ids" | "tasks" | "status">) {
+  return request<ApiLab>(apiUrl, "/teacher/labs/" + lab.id, {
+    method: "PATCH",
+    body: JSON.stringify({ name: lab.name, description: lab.description, machine_ids: lab.machine_ids, tasks: lab.tasks, publish: lab.status !== "locked" }),
+  });
+}
+
+export function deleteTeacherLab(apiUrl: string, labId: string) {
+  return request<{ id: string; message: string }>(apiUrl, "/teacher/labs/" + labId, { method: "DELETE" });
 }
 
 export function completeReview(apiUrl: string, reviewId: string) {

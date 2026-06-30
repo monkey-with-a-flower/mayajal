@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from api_test.auth import get_current_user, require_roles
 from api_test.config import AUTH_MODE
 from api_test.database import Base, SessionLocal, engine, get_db
-from api_test.models import Lab, LabAssignment, LabStatus, Machine, Role, Scenario, SystemSetting, User
+from api_test.models import Lab, LabAssignment, LabStatus, LabTask, Machine, Role, Scenario, SystemSetting, User
 from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, UserRead
 from api_test.services import require_lab_manager, require_student_access, start_session, stop_session
 from api_test.frontend_contract import router as frontend_router, user_payload
@@ -17,6 +17,25 @@ DEV_PASSWORDS = {
     "teacher.asha": "Teacher!2026",
     "admin.samir": "Admin!2026",
 }
+
+
+def wireguard_config(lab: Lab, user: User, session_id: str) -> str:
+    peer_ip = "10.66." + str(abs(hash(user.id + lab.id)) % 200 + 20) + ".2/32"
+    return "\n".join([
+        "[Interface]",
+        "PrivateKey = REPLACE_WITH_STUDENT_PRIVATE_KEY",
+        "Address = " + peer_ip,
+        "DNS = 10.66.0.1",
+        "",
+        "[Peer]",
+        "PublicKey = MAYAJAL_LAB_GATEWAY_PUBLIC_KEY",
+        "AllowedIPs = 10.66.0.0/16",
+        "Endpoint = vpn.mayajal.local:51820",
+        "PersistentKeepalive = 25",
+        "",
+        "# Lab: " + lab.name,
+        "# Session: " + session_id,
+    ]) + "\n"
 
 
 def read_lab(lab: Lab) -> LabRead:
@@ -73,6 +92,8 @@ def seed_database() -> None:
             lab = Lab(name="Web Exploit Basics", description="Find and validate common web application weaknesses.", status=LabStatus.published, owner_id=teacher.id, machines=machines)
             db.add(lab)
             db.flush()
+            for index, prompt in enumerate(["Identify the application login surface.", "Find one injectable input and document the evidence.", "Capture the final proof flag from the vulnerable service."]):
+                db.add(LabTask(lab_id=lab.id, prompt=prompt, position=index))
             db.add(LabAssignment(lab_id=lab.id, student_id=student.id, assigned_by_id=teacher.id))
             db.commit()
 
@@ -99,7 +120,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(frontend_router)
 
 
 @app.get("/health")
@@ -216,7 +236,18 @@ def start_lab(lab_id: str, db: Session = Depends(get_db), user: User = Depends(r
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published lab not found.")
     require_student_access(db, user, lab)
     session = start_session(db, lab, user)
-    return {"id": session.id, "lab_id": lab.id, "student_id": user.id, "status": session.status.value, "access_url": session.access_url, "started_at": session.started_at, "stopped_at": session.stopped_at, "message": lab.name + " is ready."}
+    filename = lab.name.lower().replace(" ", "-") + "-" + user.username.replace(".", "-") + ".conf"
+    return {
+        "id": session.id,
+        "lab_id": lab.id,
+        "student_id": user.id,
+        "status": session.status.value,
+        "wireguard_config": wireguard_config(lab, user, session.id),
+        "wireguard_filename": filename,
+        "started_at": session.started_at,
+        "stopped_at": session.stopped_at,
+        "message": lab.name + " VPN config is ready.",
+    }
 
 
 @app.post("/labs/{lab_id}/stop", response_model=LabSessionRead)
@@ -242,3 +273,6 @@ def list_sessions(lab_id: str, db: Session = Depends(get_db), user: User = Depen
     if user.role == Role.teacher:
         require_lab_manager(user, lab)
     return lab.sessions
+
+
+app.include_router(frontend_router)

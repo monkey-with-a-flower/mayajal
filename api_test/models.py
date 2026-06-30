@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Table, Column, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Table, Column, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api_test.database import Base
@@ -90,6 +90,18 @@ class Lab(Base):
     machines: Mapped[list[Machine]] = relationship(secondary=lab_machines, back_populates="labs")
     assignments: Mapped[list["LabAssignment"]] = relationship(back_populates="lab", cascade="all, delete-orphan")
     sessions: Mapped[list["LabSession"]] = relationship(back_populates="lab", cascade="all, delete-orphan")
+    tasks: Mapped[list["LabTask"]] = relationship(back_populates="lab", cascade="all, delete-orphan", order_by="LabTask.position")
+
+
+class LabTask(Base):
+    __tablename__ = "lab_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    lab_id: Mapped[str] = mapped_column(ForeignKey("labs.id", ondelete="CASCADE"))
+    prompt: Mapped[str] = mapped_column(String(500))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    lab: Mapped[Lab] = relationship(back_populates="tasks")
 
 
 class LabAssignment(Base):

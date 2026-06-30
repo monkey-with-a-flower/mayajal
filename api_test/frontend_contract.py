@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from api_test.auth import require_roles
 from api_test.config import AUTH_MODE
 from api_test.database import get_db
-from api_test.models import Lab, LabAssignment, LabSession, LabStatus, Machine, Role, Scenario, SessionStatus, SystemSetting, User
-from api_test.services import start_session
+from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, SessionStatus, SystemSetting, User
+from api_test.services import require_lab_manager, start_session
 
 router = APIRouter()
 
@@ -18,8 +18,20 @@ class ScenarioRequest(BaseModel):
     machine_ids: list[str] = Field(min_length=1)
 
 
-class NameRequest(BaseModel):
+class TeacherLabRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
+    description: str = Field(min_length=10, max_length=1000)
+    machine_ids: list[str] = Field(min_length=1)
+    tasks: list[str] = Field(default_factory=list, max_length=12)
+    publish: bool = True
+
+
+class TeacherLabUpdateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    description: str = Field(min_length=10, max_length=1000)
+    machine_ids: list[str] = Field(min_length=1)
+    tasks: list[str] = Field(default_factory=list, max_length=12)
+    publish: bool = True
 
 
 class MachineRequest(BaseModel):
@@ -67,9 +79,31 @@ def lab_payload(db: Session, lab: Lab, student_id: str | None = None) -> dict:
         "level": "Beginner",
         "runtime": "45 min",
         "progress": 35 if running else 0,
-        "next_step": "Resume your environment" if running else "Start the lab when you are ready",
+        "next_step": "Download the VPN config and connect with WireGuard" if running else "Start the lab when you are ready",
         "machine_ids": [machine.id for machine in lab.machines],
+        "tasks": [task.prompt for task in lab.tasks],
     }
+
+
+def scenario_payload(scenario: Scenario, updated_at: str | None = None) -> dict:
+    return {
+        "id": scenario.id,
+        "name": scenario.name,
+        "status": "saved",
+        "machine_ids": [machine.id for machine in scenario.machines],
+        "updated_at": updated_at or scenario.updated_at.strftime("%b %d, %H:%M"),
+    }
+
+
+def approved_machines(db: Session, machine_ids: list[str]) -> list[Machine]:
+    machines = db.query(Machine).filter(Machine.id.in_(machine_ids), Machine.approved.is_(True)).all()
+    if len(machines) != len(set(machine_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each lab machine must exist and be approved.")
+    return machines
+
+
+def replace_lab_tasks(lab: Lab, prompts: list[str]) -> None:
+    lab.tasks = [LabTask(prompt=prompt.strip(), position=index) for index, prompt in enumerate(prompts) if prompt.strip()]
 
 
 @router.get("/student/dashboard")
@@ -80,7 +114,7 @@ def student_dashboard(db: Session = Depends(get_db), user: User = Depends(requir
         "student": user_payload(user),
         "assignments": [lab_payload(db, lab, user.id) for lab in assignments],
         "machines": [machine_payload(machine) for machine in db.query(Machine).filter(Machine.approved.is_(True)).order_by(Machine.name).all()],
-        "scenarios": [{"id": scenario.id, "name": scenario.name, "status": "saved", "machine_ids": [machine.id for machine in scenario.machines], "updated_at": scenario.updated_at.strftime("%b %d, %H:%M")} for scenario in scenarios],
+        "scenarios": [scenario_payload(scenario) for scenario in scenarios],
         "activity": [{"id": "assignment-" + lab.id, "title": "Lab assigned", "detail": lab.name, "when": "Available now"} for lab in assignments],
     }
 
@@ -94,7 +128,32 @@ def save_scenario(payload: ScenarioRequest, db: Session = Depends(get_db), user:
     db.add(scenario)
     db.commit()
     db.refresh(scenario)
-    return {"id": scenario.id, "name": scenario.name, "status": "saved", "machine_ids": [machine.id for machine in scenario.machines], "updated_at": "Just now"}
+    return scenario_payload(scenario, "Just now")
+
+
+@router.patch("/student/scenarios/{scenario_id}")
+def update_scenario(scenario_id: str, payload: ScenarioRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+    scenario = db.get(Scenario, scenario_id)
+    if scenario is None or scenario.student_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found.")
+    machines = db.query(Machine).filter(Machine.id.in_(payload.machine_ids), Machine.approved.is_(True)).all()
+    if len(machines) != len(set(payload.machine_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each scenario machine must exist and be approved.")
+    scenario.name = payload.name
+    scenario.machines = machines
+    db.commit()
+    db.refresh(scenario)
+    return scenario_payload(scenario, "Just now")
+
+
+@router.delete("/student/scenarios/{scenario_id}")
+def delete_scenario(scenario_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+    scenario = db.get(Scenario, scenario_id)
+    if scenario is None or scenario.student_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found.")
+    db.delete(scenario)
+    db.commit()
+    return {"id": scenario_id, "message": "Scenario removed from your workspace."}
 
 
 @router.get("/teacher/dashboard")
@@ -110,15 +169,42 @@ def teacher_dashboard(db: Session = Depends(get_db), user: User = Depends(requir
 
 
 @router.post("/teacher/labs", status_code=status.HTTP_201_CREATED)
-def create_teacher_lab(payload: NameRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.teacher, Role.admin))):
-    machines = db.query(Machine).filter(Machine.approved.is_(True)).limit(2).all()
-    if not machines:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Add an approved machine before creating a lab.")
-    lab = Lab(name=payload.name, description="New classroom lab ready for configuration.", status=LabStatus.published, owner_id=user.id, machines=machines)
+def create_teacher_lab(payload: TeacherLabRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.teacher, Role.admin))):
+    machines = approved_machines(db, payload.machine_ids)
+    lab = Lab(name=payload.name, description=payload.description, status=LabStatus.published if payload.publish else LabStatus.draft, owner_id=user.id, machines=machines)
+    replace_lab_tasks(lab, payload.tasks)
     db.add(lab)
     db.commit()
     db.refresh(lab)
     return lab_payload(db, lab)
+
+
+@router.patch("/teacher/labs/{lab_id}")
+def update_teacher_lab(lab_id: str, payload: TeacherLabUpdateRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.teacher, Role.admin))):
+    lab = db.get(Lab, lab_id)
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found.")
+    require_lab_manager(user, lab)
+    machines = approved_machines(db, payload.machine_ids)
+    lab.name = payload.name
+    lab.description = payload.description
+    lab.machines = machines
+    replace_lab_tasks(lab, payload.tasks)
+    lab.status = LabStatus.published if payload.publish else LabStatus.draft
+    db.commit()
+    db.refresh(lab)
+    return lab_payload(db, lab)
+
+
+@router.delete("/teacher/labs/{lab_id}")
+def delete_teacher_lab(lab_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.teacher, Role.admin))):
+    lab = db.get(Lab, lab_id)
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found.")
+    require_lab_manager(user, lab)
+    db.delete(lab)
+    db.commit()
+    return {"id": lab_id, "message": "Lab removed from the teacher catalogue."}
 
 
 @router.post("/teacher/reviews/{review_id}")
