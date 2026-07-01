@@ -2,14 +2,89 @@ services:
   {{name}}:
     image: {{ image }}
     container_name: ${LABID}_{{name}}
+    {% if hostname %}
+    hostname: {{ hostname }}
+    {% endif %}
     {% if env %}
     environment:
     {% for key, value in env.items() %}
-          {{ key }}: "{{ value }}"
+      {{ key }}: {{ value | tojson }}
     {% endfor %}
     {% endif %}
-    tty: {{tty}}
+    labels:
+      mayajal.project_id: ${LABID}
+      mayajal.session_id: ${SESSIONID}
+      mayajal.lab_id: ${LAB_UUID}
+      mayajal.user_id: ${USERID}
+      mayajal.service: {{ name | tojson }}
+    {% if labels %}
+    {% for key, value in labels.items() %}
+      {{ key }}: {{ value | tojson }}
+    {% endfor %}
+    {% endif %}
+    {% if ports %}
+    expose:
+    {% for port in ports %}
+      - {{ port.split(':')[-1].split('/')[0] | tojson }}
+    {% endfor %}
+    {% endif %}
+    {% if volumes %}
+    volumes:
+    {% for volume in volumes %}
+      - {{ volume | tojson }}
+    {% endfor %}
+    {% endif %}
+    {% if command %}
+    command: {{ command | tojson }}
+    {% endif %}
+    {% if entrypoint %}
+    entrypoint: {{ entrypoint | tojson }}
+    {% endif %}
+    {% if working_dir %}
+    working_dir: {{ working_dir | tojson }}
+    {% endif %}
+    {% if run_as %}
+    user: {{ run_as | tojson }}
+    {% endif %}
+    {% if privileged %}
+    privileged: true
+    {% endif %}
+    {% if stdin_open %}
+    stdin_open: true
+    {% endif %}
+    tty: {{ tty | lower }}
+    {% if dns %}
+    dns:
+    {% for item in dns %}
+      - {{ item | tojson }}
+    {% endfor %}
+    {% endif %}
+    {% if extra_hosts %}
+    extra_hosts:
+    {% for item in extra_hosts %}
+      - {{ item | tojson }}
+    {% endfor %}
+    {% endif %}
+    {% if cap_add %}
+    cap_add:
+    {% for item in cap_add %}
+      - {{ item | tojson }}
+    {% endfor %}
+    {% endif %}
     restart: {{restart_policy}}
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:${TELEMETRY_PORT}
+        fluentd-async: "true"
+        tag: mayajal.container.${SESSIONID}.{{name}}
+        labels: mayajal.project_id,mayajal.session_id,mayajal.lab_id,mayajal.user_id,mayajal.service
     networks:
-      - lab_net
+      lab_net:
+        {% if network_aliases %}
+        aliases:
+        {% for alias in network_aliases %}
+          - {{ alias | tojson }}
+        {% endfor %}
+        {% endif %}
  

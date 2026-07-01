@@ -2,15 +2,15 @@
 
 ## Local development
 
-Start the fixture API from the repository root:
+Start the API from the repository root:
 
-    api/.venv/bin/python -m uvicorn api.test_backend:app --host 0.0.0.0 --port 8000
+    uv run --project api_test uvicorn api_test.main:app --host 0.0.0.0 --port 8001
 
 Start the frontend from this directory. Use the machine LAN address when opening it from another device:
 
-    MAYAJAL_API_URL=http://192.168.0.223:8000 npm run dev -- --hostname 0.0.0.0 --port 3000
+    npm run dev -- --hostname 0.0.0.0 --port 3000
 
-The frontend reads MAYAJAL_API_URL or NEXT_PUBLIC_API_URL when it starts, so the API endpoint can be configured independently.
+The frontend reads MAYAJAL_API_URL or NEXT_PUBLIC_API_URL when it starts. If neither is set, it uses the same hostname as the browser and port 8001, so http://192.168.1.33:3000 will call http://192.168.1.33:8001.
 
 ## Fixture accounts
 

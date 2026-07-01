@@ -1,16 +1,44 @@
+import logging
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from api_test.auth import get_current_user, require_roles
-from api_test.config import AUTH_MODE
+from api_test.config import AUTH_MODE, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS
 from api_test.database import Base, SessionLocal, engine, get_db
-from api_test.models import Lab, LabAssignment, LabStatus, LabTask, Machine, Role, Scenario, SystemSetting, User
+from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
+from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, UserRead
 from api_test.services import require_lab_manager, require_student_access, start_session, stop_session
+from api_test.telemetry import build_attack_report, search_session_events
 from api_test.frontend_contract import router as frontend_router, user_payload
+
+logger = logging.getLogger("mayajal.docker")
+
+MACHINE_RUNTIME_COLUMNS = {
+    "source_type": "VARCHAR(32) DEFAULT 'dockerhub'",
+    "hostname": "VARCHAR(160)",
+    "command": "VARCHAR(500)",
+    "entrypoint": "VARCHAR(500)",
+    "working_dir": "VARCHAR(300)",
+    "run_as": "VARCHAR(100)",
+    "restart_policy": "VARCHAR(32) DEFAULT 'unless-stopped'",
+    "privileged": "BOOLEAN DEFAULT 0",
+    "tty": "BOOLEAN DEFAULT 1",
+    "stdin_open": "BOOLEAN DEFAULT 0",
+    "ports": "JSON",
+    "volumes": "JSON",
+    "environment": "JSON",
+    "labels": "JSON",
+    "dns": "JSON",
+    "extra_hosts": "JSON",
+    "cap_add": "JSON",
+    "network_aliases": "JSON",
+}
 
 DEV_PASSWORDS = {
     "student.maya": "Student!2026",
@@ -46,8 +74,63 @@ def read_lab(lab: Lab) -> LabRead:
         status=lab.status,
         owner_id=lab.owner_id,
         machine_ids=[machine.id for machine in lab.machines],
-        student_ids=[assignment.student_id for assignment in lab.assignments],
+        student_ids=[student.id for student in lab.direct_students],
+        group_ids=[group.id for group in lab.groups],
+        assigned_student_ids=[assignment.student_id for assignment in lab.assignments],
     )
+
+
+def resolve_lab_students(db: Session, student_ids: list[str]) -> list[User]:
+    if not student_ids:
+        return []
+    students = db.query(User).filter(User.id.in_(student_ids), User.role == Role.student).all()
+    if len(students) != len(set(student_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each assignment must target an existing student.")
+    return students
+
+
+def resolve_lab_groups(db: Session, user: User, group_ids: list[str]) -> list[StudentGroup]:
+    if not group_ids:
+        return []
+    query = db.query(StudentGroup).filter(StudentGroup.id.in_(group_ids))
+    if user.role == Role.teacher:
+        query = query.filter(StudentGroup.owner_id == user.id)
+    groups = query.all()
+    if len(groups) != len(set(group_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each group assignment must target a group you manage.")
+    return groups
+
+
+def sync_lab_access(db: Session, lab: Lab, assigned_by_id: str) -> None:
+    effective_students = {student.id: student for student in lab.direct_students}
+    for group in lab.groups:
+        effective_students.update({student.id: student for student in group.students})
+    existing = {assignment.student_id: assignment for assignment in lab.assignments}
+    for assignment in list(lab.assignments):
+        if assignment.student_id not in effective_students:
+            db.delete(assignment)
+    for student_id in effective_students:
+        if student_id not in existing:
+            db.add(LabAssignment(lab_id=lab.id, student_id=student_id, assigned_by_id=assigned_by_id))
+
+
+def migrate_database() -> None:
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.begin() as connection:
+        columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(machines)").all()}
+        for name, ddl in MACHINE_RUNTIME_COLUMNS.items():
+            if name not in columns:
+                connection.exec_driver_sql(f"ALTER TABLE machines ADD COLUMN {name} {ddl}")
+        connection.exec_driver_sql("UPDATE machines SET source_type = 'dockerhub' WHERE source_type IS NULL")
+        connection.exec_driver_sql("UPDATE machines SET restart_policy = 'unless-stopped' WHERE restart_policy IS NULL")
+        connection.exec_driver_sql("UPDATE machines SET privileged = 0 WHERE privileged IS NULL")
+        connection.exec_driver_sql("UPDATE machines SET tty = 1 WHERE tty IS NULL")
+        connection.exec_driver_sql("UPDATE machines SET stdin_open = 0 WHERE stdin_open IS NULL")
+        connection.exec_driver_sql("""
+            INSERT OR IGNORE INTO lab_students (lab_id, student_id)
+            SELECT lab_id, student_id FROM lab_assignments
+        """)
 
 
 def seed_database() -> None:
@@ -89,7 +172,7 @@ def seed_database() -> None:
 
         if not db.query(Lab).filter(Lab.name == "Web Exploit Basics").first():
             machines = db.query(Machine).filter(Machine.name.in_(["Kali Workstation", "DVWA"])).all()
-            lab = Lab(name="Web Exploit Basics", description="Find and validate common web application weaknesses.", status=LabStatus.published, owner_id=teacher.id, machines=machines)
+            lab = Lab(name="Web Exploit Basics", description="Find and validate common web application weaknesses.", status=LabStatus.published, owner_id=teacher.id, machines=machines, direct_students=[student])
             db.add(lab)
             db.flush()
             for index, prompt in enumerate(["Identify the application login surface.", "Find one injectable input and document the evidence.", "Capture the final proof flag from the vulnerable service."]):
@@ -108,6 +191,7 @@ def seed_database() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    migrate_database()
     seed_database()
     yield
 
@@ -115,7 +199,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Mayajal Core API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=MAYAJAL_CORS_ORIGINS,
+    allow_origin_regex=MAYAJAL_CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -184,16 +269,12 @@ def create_lab(payload: LabCreate, db: Session = Depends(get_db), user: User = D
     machines = db.query(Machine).filter(Machine.id.in_(payload.machine_ids), Machine.approved.is_(True)).all()
     if len(machines) != len(set(payload.machine_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each lab machine must exist and be approved.")
-    students = []
-    if payload.student_ids:
-        students = db.query(User).filter(User.id.in_(payload.student_ids), User.role == Role.student).all()
-        if len(students) != len(set(payload.student_ids)):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each assignment must target an existing student.")
-    lab = Lab(name=payload.name, description=payload.description, owner_id=user.id, status=LabStatus.published if payload.publish else LabStatus.draft, machines=machines)
+    students = resolve_lab_students(db, payload.student_ids)
+    groups = resolve_lab_groups(db, user, payload.group_ids)
+    lab = Lab(name=payload.name, description=payload.description, owner_id=user.id, status=LabStatus.published if payload.publish else LabStatus.draft, machines=machines, direct_students=students, groups=groups)
     db.add(lab)
     db.flush()
-    for student in students:
-        db.add(LabAssignment(lab_id=lab.id, student_id=student.id, assigned_by_id=user.id))
+    sync_lab_access(db, lab, user.id)
     db.commit()
     db.refresh(lab)
     return read_lab(lab)
@@ -208,6 +289,8 @@ def assign_students(lab_id: str, payload: AssignmentCreate, db: Session = Depend
     students = db.query(User).filter(User.id.in_(payload.student_ids), User.role == Role.student).all()
     if len(students) != len(set(payload.student_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each assignment must target an existing student.")
+    lab.direct_students = list({student.id: student for student in [*lab.direct_students, *students]}.values())
+    db.flush()
     existing = {assignment.student_id for assignment in lab.assignments}
     for student in students:
         if student.id not in existing:
@@ -229,37 +312,226 @@ def get_lab(lab_id: str, db: Session = Depends(get_db), user: User = Depends(get
     return read_lab(lab)
 
 
+def require_lab_operator(db: Session, user: User, lab: Lab) -> None:
+    if user.role == Role.student:
+        require_student_access(db, user, lab)
+    elif user.role == Role.teacher:
+        require_lab_manager(user, lab)
+
+
+def require_session_operator(user: User, session: LabSession) -> None:
+    if user.role == Role.admin:
+        return
+    if user.role == Role.teacher and session.lab.owner_id == user.id:
+        return
+    if user.role == Role.student and session.student_id == user.id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access telemetry for this session.")
+
+
+def session_owner_for(user: User, lab: Lab) -> User:
+    return user
+
+
+def lab_operation_unavailable(exc: Exception, user: User) -> HTTPException:
+    if user.role == Role.admin:
+        if isinstance(exc, HTTPException):
+            return exc
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=type(exc).__name__ + ": " + str(exc),
+        )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Lab containers are not available right now. Ask an administrator to review the container service.",
+    )
+
+
+def lab_operation_failed(exc: Exception, user: User) -> HTTPException:
+    if user.role == Role.admin:
+        detail = str(exc)
+        if isinstance(exc, DockerProcessError) and exc.output:
+            detail = exc.output + "\n" + detail
+        return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Lab containers did not reach a confirmed running state. Ask an administrator to review the container output.",
+    )
+
+
+def vpn_filename(lab: Lab, user: User) -> str:
+    username = user.username or user.email.split("@")[0]
+    return lab.name.lower().replace(" ", "-") + "-" + username.replace(".", "-") + ".conf"
+
+
+async def run_stop_command(command: list[str], expose_output: bool = False) -> None:
+    try:
+        await run_process(command, expose_output=expose_output)
+    except Exception:
+        logger.exception("Docker Compose stop failed for command: %s", " ".join(command))
+
+
+async def cleanup_lab_project(lab: Lab, project_id: str, user_id: str, session_id: str, expose_output: bool = False) -> str:
+    command = compose_command(lab, "stop", project_id, user_id, session_id)
+    try:
+        return await run_process(command, expose_output=expose_output)
+    except Exception:
+        logger.exception("Docker Compose cleanup failed for command: %s", " ".join(command))
+        return ""
+
+
 @app.post("/labs/{lab_id}/start", status_code=status.HTTP_201_CREATED)
-def start_lab(lab_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+async def start_lab(lab_id: str, stream: bool = Query(False), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     lab = db.get(Lab, lab_id)
     if lab is None or lab.status != LabStatus.published:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published lab not found.")
-    require_student_access(db, user, lab)
-    session = start_session(db, lab, user)
-    filename = lab.name.lower().replace(" ", "-") + "-" + user.username.replace(".", "-") + ".conf"
-    return {
+    require_lab_operator(db, user, lab)
+    session_user = session_owner_for(user, lab)
+    project_id = instance_id(lab, session_user.id)
+    existing_session = next((item for item in lab.sessions if item.student_id == session_user.id and item.status.value == "running"), None)
+    if existing_session is not None:
+        try:
+            await verify_compose_project(lab, project_id, timeout_seconds=2)
+        except Exception:
+            stop_session(db, existing_session)
+            existing_session = None
+    planned_session_id = existing_session.id if existing_session is not None else str(uuid.uuid4())
+    command = None
+    if existing_session is None:
+        try:
+            await cleanup_lab_project(lab, project_id, session_user.id, planned_session_id, expose_output=False)
+            command = compose_command(lab, "start", project_id, session_user.id, planned_session_id)
+        except Exception as exc:
+            raise lab_operation_unavailable(exc, user) from exc
+
+    if stream:
+        if user.role != Role.admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators can stream lab startup output.")
+
+        async def start_stream():
+            if existing_session is not None:
+                yield "Lab session is already marked running.\n"
+                return
+            try:
+                if command is None:
+                    raise RuntimeError("Docker Compose start command was not prepared.")
+                async for chunk in stream_process(command):
+                    yield chunk
+                yield "\nVerifying Compose project state...\n"
+                verification_output = await verify_compose_project(lab, project_id)
+                yield verification_output + "\n"
+                yield "\nWaiting for WireGuard peer configuration...\n"
+                await wait_for_wireguard_config(project_id)
+                start_session(db, lab, session_user, planned_session_id)
+                yield "Lab containers are confirmed running.\n"
+            except Exception as exc:
+                await cleanup_lab_project(lab, project_id, session_user.id, planned_session_id, expose_output=False)
+                yield "Error: " + str(exc) + "\n"
+
+        return StreamingResponse(start_stream(), media_type="text/plain")
+
+    if existing_session is None:
+        try:
+            if command is None:
+                raise RuntimeError("Docker Compose start command was not prepared.")
+            output = await run_process(command, expose_output=user.role == Role.admin)
+            verification_output = await verify_compose_project(lab, project_id)
+            config = await wait_for_wireguard_config(project_id)
+        except Exception as exc:
+            await cleanup_lab_project(lab, project_id, session_user.id, planned_session_id, expose_output=False)
+            raise lab_operation_failed(exc, user) from exc
+        session = start_session(db, lab, session_user, planned_session_id)
+    else:
+        output = ""
+        try:
+            config = await wait_for_wireguard_config(project_id)
+        except Exception as exc:
+            raise lab_operation_failed(exc, user) from exc
+        session = existing_session
+    response = {
         "id": session.id,
         "lab_id": lab.id,
-        "student_id": user.id,
+        "student_id": session_user.id,
         "status": session.status.value,
-        "wireguard_config": wireguard_config(lab, user, session.id),
-        "wireguard_filename": filename,
+        "wireguard_config": config,
+        "wireguard_filename": vpn_filename(lab, session_user),
         "started_at": session.started_at,
         "stopped_at": session.stopped_at,
         "message": lab.name + " VPN config is ready.",
     }
+    if user.role == Role.admin:
+        response["output"] = output + ("\n" + verification_output if existing_session is None else "")
+    return response
 
 
-@app.post("/labs/{lab_id}/stop", response_model=LabSessionRead)
-def stop_lab(lab_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+@app.get("/labs/{lab_id}/vpn")
+async def get_lab_vpn(lab_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     lab = db.get(Lab, lab_id)
     if lab is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found.")
-    require_student_access(db, user, lab)
-    session = next((item for item in lab.sessions if item.student_id == user.id and item.status.value == "running"), None)
+    require_lab_operator(db, user, lab)
+    session_user = session_owner_for(user, lab)
+    project_id = instance_id(lab, session_user.id)
+    session = next((item for item in lab.sessions if item.student_id == session_user.id and item.status.value == "running"), None)
     if session is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Start the lab before downloading the VPN config.")
+    try:
+        await verify_compose_project(lab, project_id, timeout_seconds=2)
+        config = await wait_for_wireguard_config(project_id, timeout_seconds=5)
+    except Exception as exc:
+        stop_session(db, session)
+        raise lab_operation_failed(exc, user) from exc
+    return {
+        "lab_id": lab.id,
+        "wireguard_config": config,
+        "wireguard_filename": vpn_filename(lab, session_user),
+    }
+
+
+@app.post("/labs/{lab_id}/stop", response_model=LabSessionRead)
+async def stop_lab(lab_id: str, background_tasks: BackgroundTasks, stream: bool = Query(False), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    lab = db.get(Lab, lab_id)
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found.")
+    require_lab_operator(db, user, lab)
+    session_user = session_owner_for(user, lab)
+    project_id = instance_id(lab, session_user.id)
+    session = next((item for item in lab.sessions if item.student_id == session_user.id and item.status.value == "running"), None)
+    if session is None:
+        stopped_session = (
+            db.query(LabSession)
+            .filter(
+                LabSession.lab_id == lab.id,
+                LabSession.student_id == session_user.id,
+                LabSession.status == SessionStatus.stopped,
+            )
+            .order_by(LabSession.stopped_at.desc(), LabSession.started_at.desc())
+            .first()
+        )
+        if stopped_session is not None:
+            return stopped_session
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You do not have a running session for this lab.")
-    return stop_session(db, session)
+    try:
+        command = compose_command(lab, "stop", project_id, session_user.id, session.id)
+    except Exception as exc:
+        raise lab_operation_unavailable(exc, user) from exc
+    if stream:
+        if user.role != Role.admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only administrators can stream lab shutdown output.")
+
+        async def stop_stream():
+            try:
+                async for chunk in stream_process(command):
+                    yield chunk
+                stop_session(db, session)
+                yield "Lab session marked stopped.\n"
+            except Exception as exc:
+                yield "Error: " + str(exc) + "\n"
+
+        return StreamingResponse(stop_stream(), media_type="text/plain")
+    stopped_session = stop_session(db, session)
+    background_tasks.add_task(run_stop_command, command, user.role == Role.admin)
+    return stopped_session
 
 
 @app.get("/labs/{lab_id}/sessions", response_model=list[LabSessionRead])
@@ -273,6 +545,25 @@ def list_sessions(lab_id: str, db: Session = Depends(get_db), user: User = Depen
     if user.role == Role.teacher:
         require_lab_manager(user, lab)
     return lab.sessions
+
+
+@app.get("/sessions/{session_id}/telemetry")
+def get_session_telemetry(session_id: str, size: int = Query(200, ge=1, le=1000), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    session = db.get(LabSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
+    require_session_operator(user, session)
+    return {"session_id": session_id, "events": search_session_events(session_id, size=size)}
+
+
+@app.get("/sessions/{session_id}/attack-report")
+def get_session_attack_report(session_id: str, size: int = Query(500, ge=1, le=2000), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    session = db.get(LabSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
+    require_session_operator(user, session)
+    events = search_session_events(session_id, size=size)
+    return build_attack_report(session_id, events)
 
 
 app.include_router(frontend_router)

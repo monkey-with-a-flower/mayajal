@@ -404,7 +404,7 @@ function SignIn({ onSignIn }: { onSignIn: (username: string, password: string) =
 
 export default function Home() {
   const [account, setAccount] = useState<Account | null>(null);
-  const [apiUrl, setApiUrl] = useState("http://127.0.0.1:8000");
+  const [apiUrl, setApiUrl] = useState("http://127.0.0.1:8001");
   const [activeNav, setActiveNav] = useState("My learning");
   const role = account?.role ?? "student";
 

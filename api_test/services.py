@@ -23,11 +23,11 @@ def require_student_access(db: Session, user: User, lab: Lab) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This lab is not assigned to you.")
 
 
-def start_session(db: Session, lab: Lab, student: User) -> LabSession:
+def start_session(db: Session, lab: Lab, student: User, session_id: str | None = None) -> LabSession:
     existing = db.query(LabSession).filter(LabSession.lab_id == lab.id, LabSession.student_id == student.id, LabSession.status == SessionStatus.running).first()
     if existing:
         return existing
-    session = LabSession(lab_id=lab.id, student_id=student.id, status=SessionStatus.running)
+    session = LabSession(id=session_id, lab_id=lab.id, student_id=student.id, status=SessionStatus.running) if session_id else LabSession(lab_id=lab.id, student_id=student.id, status=SessionStatus.running)
     db.add(session)
     db.flush()
     session.access_url = f"https://labs.mayajal.local/sessions/{session.id}"

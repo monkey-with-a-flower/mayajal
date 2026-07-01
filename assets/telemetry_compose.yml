@@ -1,0 +1,62 @@
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: mayajal_opensearch
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "Sakarmahat@123"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - mayajal_opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.1
+    container_name: mayajal_opensearch_dashboards
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    ports:
+      - "5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+  telemetry-setup:
+    image: curlimages/curl:8.10.1
+    container_name: mayajal_telemetry_setup
+    command: ["sh", "/setup/setup_dashboards.sh"]
+    volumes:
+      - ./opensearch/setup_dashboards.sh:/setup/setup_dashboards.sh:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      opensearch-dashboards:
+        condition: service_started
+    restart: "no"
+
+  fluent-bit:
+    image: cr.fluentbit.io/fluent/fluent-bit:3.1
+    container_name: mayajal_fluent_bit
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.conf"]
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    volumes:
+      - ./fluent-bit/central-fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mayajal_opensearch_data:

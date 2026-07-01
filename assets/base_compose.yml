@@ -2,6 +2,12 @@ services:
   wireguard:
     image: lscr.io/linuxserver/wireguard:latest
     container_name: ${LABID}_wireguard
+    labels:
+      mayajal.project_id: ${LABID}
+      mayajal.session_id: ${SESSIONID}
+      mayajal.lab_id: ${LAB_UUID}
+      mayajal.user_id: ${USERID}
+      mayajal.service: wireguard
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -10,36 +16,105 @@ services:
       - PGID=1000
       - TZ=Australia/Sydney
       - SERVERURL=${MASTERURL}
-      - SERVERPORT=${LABPORT}
+      - SERVERPORT=${VPNPORT}
       - PEERS=peer1
       - PEERDNS=1.1.1.1
-      - INTERNAL_SUBNET=10.13.13.0/24
-      - ALLOWEDIPS=10.13.13.0/24,172.30.20.0/24
-    volumes:
-      - /opt/mayajal/labs/${LABID}/config/wireguard:/config
-      - /lib/modules:/lib/modules:ro
+      - INTERNAL_SUBNET=${WGSUBNET}
+      - ALLOWEDIPS=${WGSUBNET},${LABSUBNET}
     ports:
-      - "${LABPORT}:51820/udp"
+      - "${VPNPORT}:51820/udp"
+    volumes:
+      - ${LABROOT}/${LABID}/config/wireguard:/config
+      - /lib/modules:/lib/modules:ro
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
     networks:
-      - lab_net
+      lab_net:
+        ipv4_address: ${LABGATEWAY}
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:${TELEMETRY_PORT}
+        fluentd-async: "true"
+        tag: mayajal.container.${SESSIONID}.wireguard
+        labels: mayajal.project_id,mayajal.session_id,mayajal.lab_id,mayajal.user_id,mayajal.service
     restart: unless-stopped
 
   suricata:
-    image: suricata:loaded
+    image: jasonish/suricata:latest
     container_name: ${LABID}_suricata
+    labels:
+      mayajal.project_id: ${LABID}
+      mayajal.session_id: ${SESSIONID}
+      mayajal.lab_id: ${LAB_UUID}
+      mayajal.user_id: ${USERID}
+      mayajal.service: suricata
     cap_add:
       - NET_ADMIN
     volumes:
-      - ./config/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
-      - /opt/mayajal/labs/${LABID}/logs/suricata:/var/log/suricata
+      - ${LABROOT}/${LABID}/generated/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ${LABROOT}/${LABID}/logs/suricata:/var/log/suricata
     #   - ./rules:/var/lib/suricata/rules
     #   - ./custom-data:/custom-data
     command: ["-i", "eth0", "-c", "/etc/suricata/suricata.yaml", "-v"]
     networks:
       - lab_net
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:${TELEMETRY_PORT}
+        fluentd-async: "true"
+        tag: mayajal.container.${SESSIONID}.suricata
+        labels: mayajal.project_id,mayajal.session_id,mayajal.lab_id,mayajal.user_id,mayajal.service
+    restart: unless-stopped
+
+  fluent-bit:
+    image: cr.fluentbit.io/fluent/fluent-bit:3.1
+    container_name: ${LABID}_fluent-bit
+    labels:
+      mayajal.project_id: ${LABID}
+      mayajal.session_id: ${SESSIONID}
+      mayajal.lab_id: ${LAB_UUID}
+      mayajal.user_id: ${USERID}
+      mayajal.service: fluent-bit
+    environment:
+      SESSIONID: ${SESSIONID}
+      LAB_UUID: ${LAB_UUID}
+      USERID: ${USERID}
+      LABID: ${LABID}
+      TELEMETRY_HOST: ${TELEMETRY_HOST}
+      TELEMETRY_PORT: ${TELEMETRY_PORT}
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.conf"]
+    volumes:
+      - ${LABROOT}/${LABID}/generated/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ${LABROOT}/${LABID}/logs/suricata:/lab/logs/suricata:ro
+      - ${LABROOT}/${LABID}/state:/lab/state
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      - suricata
+    networks:
+      - lab_net
+      - telemetry_net
+    restart: unless-stopped
+
+  route-init:
+    image: busybox:1.36
+    container_name: ${LABID}_route-init
+    network_mode: host
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    command:
+      - sh
+      - -c
+      - |
+        ip route replace ${WGSUBNET} via ${LABGATEWAY}
+        trap 'ip route del ${WGSUBNET} via ${LABGATEWAY} 2>/dev/null || true; exit 0' INT TERM
+        while true; do sleep 3600; done
+    depends_on:
+      - wireguard
     restart: unless-stopped
 
 networks:
@@ -48,4 +123,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.30.20.0/24
+        - subnet: ${LABSUBNET}
+  telemetry_net:
+    name: ${LABID}_telemetry
+    driver: bridge
