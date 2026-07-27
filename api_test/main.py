@@ -38,6 +38,7 @@ MACHINE_RUNTIME_COLUMNS = {
     "extra_hosts": "JSON",
     "cap_add": "JSON",
     "network_aliases": "JSON",
+    "detection_profile": "VARCHAR(100)",
 }
 
 DEV_PASSWORDS = {
@@ -154,10 +155,29 @@ def seed_database() -> None:
             ("Kali Workstation", "kalilinux/kali-rolling", "Linux", "Attacker workstation with common security tools."),
             ("DVWA", "vulnerables/web-dvwa", "Linux", "Deliberately vulnerable web application target."),
             ("Suricata Sensor", "jasonish/suricata", "Linux", "Network inspection and alerting sensor."),
+            ("Weak Password Payroll", "mayajal/weak-password-login:demo", "Linux", "Demo payroll web app with intentionally weak credentials."),
         ]
         for name, image_url, os_type, description in machine_specs:
-            if not db.query(Machine).filter(Machine.name == name).first():
-                db.add(Machine(name=name, image_url=image_url, os_type=os_type, description=description, created_by_id=admin.id))
+            existing_machine = db.query(Machine).filter(Machine.name == name).first()
+            if not existing_machine:
+                detection_profile = "weak-password-login" if name == "Weak Password Payroll" else None
+                db.add(Machine(
+                    name=name,
+                    image_url=image_url,
+                    source_type="local" if name == "Weak Password Payroll" else "dockerhub",
+                    os_type=os_type,
+                    description=description,
+                    ports=["8080"] if name == "Weak Password Payroll" else None,
+                    network_aliases=["payroll", "weak-password-login"] if name == "Weak Password Payroll" else None,
+                    detection_profile=detection_profile,
+                    created_by_id=admin.id,
+                ))
+            elif name == "Weak Password Payroll":
+                existing_machine.image_url = image_url
+                existing_machine.source_type = "local"
+                existing_machine.ports = ["8080"]
+                existing_machine.network_aliases = ["payroll", "weak-password-login"]
+                existing_machine.detection_profile = "weak-password-login"
         db.commit()
 
         setting_specs = [

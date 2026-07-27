@@ -62,6 +62,32 @@ def _clean_dict(values: dict[str, str] | None) -> dict[str, str]:
     return {key.strip(): value.strip() for key, value in (values or {}).items() if key.strip()}
 
 
+def _profile_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    profile = value.strip()
+    if not profile or not re.fullmatch(r"[a-zA-Z0-9_.-]+", profile):
+        return None
+    return profile
+
+
+def _machine_build_context(machine: Machine) -> str | None:
+    profile = _profile_name(machine.detection_profile)
+    if machine.source_type != "local" or not profile:
+        return None
+    context = ASSETS_DIR / "machines" / profile
+    return str(context) if context.is_dir() else None
+
+
+def _machine_rule_profiles(lab: Lab) -> list[str]:
+    profiles: list[str] = []
+    for machine in lab.machines:
+        profile = _profile_name(machine.detection_profile)
+        if profile and profile not in profiles and (ASSETS_DIR / "rules" / f"{profile}.rules").is_file():
+            profiles.append(profile)
+    return profiles
+
+
 def instance_id(lab: Lab, user_id: str) -> str:
     return f"{lab.id}-{user_id}"
 
@@ -166,6 +192,14 @@ def _ensure_suricata_http_eve_logging(config: str) -> None:
         raise RuntimeError("Suricata EVE HTTP logging is disabled.")
 
 
+def _render_suricata_config(base_config: str, lab_subnet: str, rule_profiles: list[str]) -> str:
+    rendered = base_config.replace("HOME_NET: \"[172.30.20.0/24]\"", f"HOME_NET: \"[{lab_subnet}]\"")
+    if rule_profiles:
+        rule_lines = "\n".join(f"  - {profile}.rules" for profile in rule_profiles)
+        rendered = rendered.replace("rule-files:\n  - suricata.rules", "rule-files:\n  - suricata.rules\n" + rule_lines)
+    return rendered
+
+
 def prepare_lab_runtime(lab: Lab, project_id: str, peer_id: str, session_id: str, refresh_vpn_config: bool = False) -> Path:
     lab_dir = LAB_RUNTIME_DIR / project_id
     lab_dir.mkdir(parents=True, exist_ok=True)
@@ -219,11 +253,17 @@ def prepare_lab_runtime(lab: Lab, project_id: str, peer_id: str, session_id: str
     (fluent_bit_dir / "fluent-bit.conf").write_text((ASSETS_DIR / "fluent-bit" / "lab-fluent-bit.conf").read_text())
     (lab_dir / "state").mkdir(parents=True, exist_ok=True)
 
-    suricata_config = ASSETS_DIR / "config" / "suricata" / "suricata.yaml"
-    rendered_suricata = suricata_config.read_text().replace("HOME_NET: \"[172.30.20.0/24]\"", f"HOME_NET: \"[{lab_subnet}]\"")
-    _ensure_suricata_http_eve_logging(rendered_suricata)
     suricata_dir = lab_dir / "generated" / "suricata"
     suricata_dir.mkdir(parents=True, exist_ok=True)
+    rule_profiles = _machine_rule_profiles(lab)
+    rules_dir = suricata_dir / "rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "suricata.rules").write_text("")
+    for profile in rule_profiles:
+        shutil.copyfile(ASSETS_DIR / "rules" / f"{profile}.rules", rules_dir / f"{profile}.rules")
+    suricata_config = ASSETS_DIR / "config" / "suricata" / "suricata.yaml"
+    rendered_suricata = _render_suricata_config(suricata_config.read_text(), lab_subnet, rule_profiles)
+    _ensure_suricata_http_eve_logging(rendered_suricata)
     (suricata_dir / "suricata.yaml").write_text(rendered_suricata)
 
     machine_template = Template((ASSETS_DIR / "machine_template.yml.j2").read_text())
@@ -232,6 +272,7 @@ def prepare_lab_runtime(lab: Lab, project_id: str, peer_id: str, session_id: str
             machine_template.render(
                 name=_service_name(machine),
                 image=machine.image_url,
+                build_context=_machine_build_context(machine),
                 hostname=machine.hostname,
                 command=machine.command,
                 entrypoint=machine.entrypoint,

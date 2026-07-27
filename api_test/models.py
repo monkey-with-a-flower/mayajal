@@ -113,6 +113,7 @@ class Machine(Base):
     extra_hosts: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     cap_add: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     network_aliases: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    detection_profile: Mapped[str | None] = mapped_column(String(100), nullable=True)
     approved: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

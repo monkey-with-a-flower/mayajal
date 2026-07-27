@@ -45,6 +45,7 @@ class MachineCreate(BaseModel):
     extra_hosts: list[str] = Field(default_factory=list, max_length=24)
     cap_add: list[str] = Field(default_factory=list, max_length=24)
     network_aliases: list[str] = Field(default_factory=list, max_length=12)
+    detection_profile: str | None = Field(default=None, max_length=100)
 
 
 class MachineRead(BaseModel):
@@ -71,6 +72,7 @@ class MachineRead(BaseModel):
     extra_hosts: list[str] | None
     cap_add: list[str] | None
     network_aliases: list[str] | None
+    detection_profile: str | None
     approved: bool
 
     model_config = {"from_attributes": True}

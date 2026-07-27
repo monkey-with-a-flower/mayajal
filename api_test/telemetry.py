@@ -66,7 +66,13 @@ def _event_text(event: dict[str, Any]) -> str:
 
 
 def _classify_event(event: dict[str, Any]) -> tuple[str, str, str, str]:
+    alert = event.get("alert") if isinstance(event.get("alert"), dict) else {}
+    signature_id = str(alert.get("signature_id") or alert.get("sid") or event.get("signature_id") or event.get("sid") or "")
+    if signature_id == "9001001":
+        return ("Credential Access", "T1110", "Brute Force", "Mayajal weak-password login rule detected repeated login attempts.")
     text = _event_text(event)
+    if "mayajal weak password login brute force attempt" in text:
+        return ("Credential Access", "T1110", "Brute Force", "Mayajal weak-password login rule detected repeated login attempts.")
     if any(token in text for token in ["nmap", "masscan", "nikto", "gobuster", "dirb", "scan", "sweep", "probe"]):
         return ("Reconnaissance", "T1595", "Active Scanning", "Scanning or probing activity was observed.")
     if any(token in text for token in ["sql injection", "sqli", "xss", "traversal", "lfi", "rfi", "exploit", "shellshock", "web attack"]):
@@ -104,6 +110,7 @@ def build_attack_report(session_id: str, events: list[dict[str, Any]]) -> dict[s
                     "source_ip": event.get("src_ip") or event.get("source_ip"),
                     "destination_ip": event.get("dest_ip") or event.get("destination_ip"),
                     "event_type": event.get("event_type") or event.get("telemetry_source"),
+                    "signature_id": alert.get("signature_id") or alert.get("sid") or event.get("signature_id") or event.get("sid"),
                     "signature": alert.get("signature") or event.get("log") or event.get("message"),
                 }
             )

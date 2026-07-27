@@ -1,5 +1,9 @@
 services:
   {{name}}:
+    {% if build_context %}
+    build:
+      context: {{ build_context | tojson }}
+    {% endif %}
     image: {{ image }}
     container_name: ${LABID}_{{name}}
     {% if hostname %}

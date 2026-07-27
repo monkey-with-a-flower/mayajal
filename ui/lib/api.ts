@@ -29,6 +29,7 @@ export type ApiMachine = {
   extra_hosts: string[];
   cap_add: string[];
   network_aliases: string[];
+  detection_profile: string | null;
   added_by: string;
 };
 
@@ -332,6 +333,7 @@ export type MachineInput = {
   extra_hosts: string[];
   cap_add: string[];
   network_aliases: string[];
+  detection_profile?: string | null;
 };
 
 export function createAdminMachine(apiUrl: string, machine: MachineInput) {

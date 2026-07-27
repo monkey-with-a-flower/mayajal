@@ -338,6 +338,7 @@ type MachineDraft = {
   extra_hosts: string;
   cap_add: string;
   network_aliases: string;
+  detection_profile: string;
 };
 
 const emptyMachineDraft: MachineDraft = {
@@ -363,6 +364,7 @@ const emptyMachineDraft: MachineDraft = {
   extra_hosts: "",
   cap_add: "",
   network_aliases: "",
+  detection_profile: "",
 };
 
 function lines(value: string) {
@@ -400,6 +402,7 @@ function machinePayload(draft: MachineDraft): MachineInput {
     extra_hosts: lines(draft.extra_hosts),
     cap_add: lines(draft.cap_add),
     network_aliases: lines(draft.network_aliases),
+    detection_profile: draft.detection_profile.trim() || null,
   };
 }
 
@@ -428,6 +431,7 @@ function machineDraftFrom(machine: ApiMachine): MachineDraft {
     extra_hosts: machine.extra_hosts.join("\n"),
     cap_add: machine.cap_add.join("\n"),
     network_aliases: machine.network_aliases.join("\n"),
+    detection_profile: machine.detection_profile ?? "",
   };
 }
 
@@ -438,9 +442,10 @@ function MachineForm({ value, onChange, onSubmit, submitLabel, onCancel }: { val
       <label className="text-sm font-bold text-ink/72">Image source<select value={value.source_type} onChange={(event) => onChange({ ...value, source_type: event.target.value as MachineInput["source_type"] })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern"><option value="dockerhub">Docker Hub</option><option value="local">Local image</option><option value="custom">Custom registry URL</option></select></label>
       <label className="text-sm font-bold text-ink/72">Image reference<input value={value.image_url} onChange={(event) => onChange({ ...value, image_url: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" placeholder={value.source_type === "dockerhub" ? "vulnerables/web-dvwa:latest" : value.source_type === "local" ? "local/image:tag" : "registry.example.local/team/image:tag"} /></label>
     </div>
-    <div className="grid gap-3 lg:grid-cols-[160px_1fr]">
+    <div className="grid gap-3 lg:grid-cols-[160px_1fr_220px]">
       <label className="text-sm font-bold text-ink/72">OS type<select value={value.os_type} onChange={(event) => onChange({ ...value, os_type: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern"><option>Linux</option><option>Windows</option><option>Others</option></select></label>
       <label className="text-sm font-bold text-ink/72">Description<input value={value.description} onChange={(event) => onChange({ ...value, description: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" placeholder="Approved vulnerable service for web exploitation labs" /></label>
+      <label className="text-sm font-bold text-ink/72">Detection profile<input value={value.detection_profile} onChange={(event) => onChange({ ...value, detection_profile: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" placeholder="weak-password-login" /></label>
     </div>
     <div className="grid gap-3 lg:grid-cols-3">
       <label className="text-sm font-bold text-ink/72">Hostname<input value={value.hostname} onChange={(event) => onChange({ ...value, hostname: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" /></label>

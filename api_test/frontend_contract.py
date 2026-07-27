@@ -66,6 +66,7 @@ class MachineRequest(BaseModel):
     extra_hosts: list[str] = Field(default_factory=list, max_length=24)
     cap_add: list[str] = Field(default_factory=list, max_length=24)
     network_aliases: list[str] = Field(default_factory=list, max_length=12)
+    detection_profile: str | None = Field(default=None, max_length=100)
 
 
 class RoleRequest(BaseModel):
@@ -109,6 +110,7 @@ def machine_payload(machine: Machine) -> dict:
         "extra_hosts": machine.extra_hosts or [],
         "cap_add": machine.cap_add or [],
         "network_aliases": machine.network_aliases or [],
+        "detection_profile": machine.detection_profile,
         "added_by": "Platform" if machine.created_by_id else "System",
     }
 

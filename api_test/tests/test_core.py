@@ -154,6 +154,34 @@ def test_session_attack_report_uses_authorized_session_telemetry(client: TestCli
     assert stopped.status_code == 200
 
 
+def test_session_attack_report_maps_weak_password_bruteforce_rule(client: TestClient, monkeypatch):
+    headers = login(client, "student.maya", "Student!2026")
+    lab_id = client.get("/labs", headers=headers).json()[0]["id"]
+    started = client.post(f"/labs/{lab_id}/start", headers=headers)
+    assert started.status_code == 201
+    session_id = started.json()["id"]
+
+    monkeypatch.setattr("api_test.main.search_session_events", lambda requested_session_id, size=500: [{
+        "session_id": requested_session_id,
+        "@timestamp": "2026-07-01T00:00:00Z",
+        "event_type": "alert",
+        "src_ip": "10.66.1.2",
+        "dest_ip": "10.200.1.10",
+        "alert": {
+            "signature_id": 9001001,
+            "signature": "MAYAJAL Weak Password Login Brute Force Attempt",
+            "category": "Web Application Attack",
+        },
+    }])
+    report = client.get(f"/sessions/{session_id}/attack-report", headers=headers)
+    assert report.status_code == 200
+    assert report.json()["attack_chain"][0]["tactic"] == "Credential Access"
+    assert report.json()["attack_chain"][0]["technique_id"] == "T1110"
+    assert report.json()["attack_chain"][0]["evidence"][0]["signature_id"] == 9001001
+    stopped = client.post(f"/labs/{lab_id}/stop", headers=headers)
+    assert stopped.status_code == 200
+
+
 def test_rendered_suricata_config_logs_http_events(client: TestClient):
     headers = login(client, "student.maya", "Student!2026")
     lab_id = client.get("/labs", headers=headers).json()[0]["id"]
@@ -167,6 +195,33 @@ def test_rendered_suricata_config_logs_http_events(client: TestClient):
         db.close()
     assert "- http:" in config
     assert "enabled: yes" in config[config.index("- http:"):config.index("# ---- DNS")]
+
+
+def test_rendered_lab_runtime_loads_machine_detection_rules(client: TestClient):
+    teacher = login(client, "teacher.asha", "Teacher!2026")
+    dashboard = client.get("/teacher/dashboard", headers=teacher).json()
+    payroll_machine = next(machine for machine in dashboard["machines"] if machine["name"] == "Weak Password Payroll")
+    created = client.post("/teacher/labs", headers=teacher, json={
+        "name": "Weak Password Detection Runtime",
+        "description": "Runtime should load the machine-specific brute force detection rule.",
+        "machine_ids": [payroll_machine["id"]],
+        "tasks": ["Trigger failed login attempts."],
+        "publish": True,
+    })
+    assert created.status_code == 201
+    db = SessionLocal()
+    try:
+        lab = db.get(Lab, created.json()["id"])
+        assert lab is not None
+        lab_dir = prepare_lab_runtime(lab, "test-weak-password-rules", "test-user", "test-session")
+        suricata_config = (lab_dir / "generated" / "suricata" / "suricata.yaml").read_text()
+        rule_file = (lab_dir / "generated" / "suricata" / "rules" / "weak-password-login.rules").read_text()
+        compose_file = (lab_dir / f"{payroll_machine['id']}.yml").read_text()
+    finally:
+        db.close()
+    assert "- weak-password-login.rules" in suricata_config
+    assert "sid:9001001" in rule_file
+    assert "assets/machines/weak-password-login" in compose_file
 
 
 def test_rendered_wireguard_template_preserves_peer_source_ip(client: TestClient):

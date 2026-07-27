@@ -54,8 +54,8 @@ services:
       - NET_ADMIN
     volumes:
       - ${LABROOT}/${LABID}/generated/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ${LABROOT}/${LABID}/generated/suricata/rules:/var/lib/suricata/rules:ro
       - ${LABROOT}/${LABID}/logs/suricata:/var/log/suricata
-    #   - ./rules:/var/lib/suricata/rules
     #   - ./custom-data:/custom-data
     command: ["-i", "eth0", "-c", "/etc/suricata/suricata.yaml", "-v"]
     networks:
