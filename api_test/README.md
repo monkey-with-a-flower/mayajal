@@ -75,6 +75,16 @@ Imported files become that machine's Docker build context. Attachment download
 URLs are returned when the lab starts and remain authorized only while that
 user's lab session is running.
 
+Administrators can refresh an imported machine from its stored repository,
+ref, and folder, or inspect its immutable import history:
+
+    POST /admin/machines/{machine_id}/refresh-github
+    GET /admin/machines/{machine_id}/versions
+
+Refreshes are validated in a staging directory before the active build context
+is replaced. Each successful import records an archive digest and manifest
+snapshot; an unchanged archive is not imported again.
+
 Detection layout:
 
     detections/network/*.rules          # Suricata, loaded at lab startup

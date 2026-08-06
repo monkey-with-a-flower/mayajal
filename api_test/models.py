@@ -127,6 +127,24 @@ class Machine(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     labs: Mapped[list["Lab"]] = relationship(secondary=lab_machines, back_populates="machines")
+    import_versions: Mapped[list["MachineImportVersion"]] = relationship(back_populates="machine", cascade="all, delete-orphan", order_by="MachineImportVersion.imported_at")
+
+
+class MachineImportVersion(Base):
+    __tablename__ = "machine_import_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    machine_id: Mapped[str] = mapped_column(ForeignKey("machines.id", ondelete="CASCADE"))
+    source_digest: Mapped[str] = mapped_column(String(64))
+    repository_url: Mapped[str] = mapped_column(String(500))
+    repository_ref: Mapped[str] = mapped_column(String(200))
+    repository_path: Mapped[str] = mapped_column(String(500))
+    manifest: Mapped[dict] = mapped_column(JSON)
+    imported_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    machine: Mapped[Machine] = relationship(back_populates="import_versions")
+    imported_by: Mapped[User] = relationship()
 
 
 class StudentGroup(Base):

@@ -33,6 +33,12 @@ export type ApiMachine = {
   network_aliases: string[];
   detection_profile: string | null;
   added_by: string;
+  repository_url: string | null;
+  repository_ref: string | null;
+  repository_path: string | null;
+  source_digest: string | null;
+  import_version: number;
+  last_imported_at: string | null;
 };
 
 export type ApiLab = {
@@ -429,6 +435,14 @@ export function createAdminMachine(apiUrl: string, machine: MachineInput) {
 
 export function updateAdminMachine(apiUrl: string, machineId: string, machine: MachineInput) {
   return request<ApiMachine>(apiUrl, "/admin/machines/" + machineId, { method: "PATCH", body: JSON.stringify(machine) });
+}
+
+export function refreshGitHubMachine(apiUrl: string, machineId: string) {
+  return request<ApiMachine & { message: string }>(apiUrl, "/admin/machines/" + machineId + "/refresh-github", { method: "POST" });
+}
+
+export function getMachineVersions(apiUrl: string, machineId: string) {
+  return request<{ id: string; version: number; source_digest: string; repository_url: string; repository_ref: string; repository_path: string; imported_at: string; imported_by: string }[]>(apiUrl, "/admin/machines/" + machineId + "/versions");
 }
 
 export function changeUserRole(apiUrl: string, userId: string, role: "student" | "teacher" | "admin") {

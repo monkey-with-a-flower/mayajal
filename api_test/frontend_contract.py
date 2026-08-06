@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
+import hashlib
 import re
+import shutil
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -9,7 +12,7 @@ from sqlalchemy.orm import Session
 from api_test.auth import require_roles
 from api_test.config import AUTH_MODE, IMPORTED_MACHINES_DIR
 from api_test.database import get_db
-from api_test.models import Lab, LabAnswer, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
+from api_test.models import Lab, LabAnswer, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, MachineImportVersion, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.services import require_lab_manager, require_student_access, start_session
 from api_test.machine_import import MachineImportError, download_github_archive, install_machine_archive
 
@@ -113,6 +116,7 @@ def user_payload(user: User) -> dict:
 
 
 def machine_payload(machine: Machine) -> dict:
+    latest_version = machine.import_versions[-1] if machine.import_versions else None
     return {
         "id": machine.id,
         "name": machine.name,
@@ -145,6 +149,9 @@ def machine_payload(machine: Machine) -> dict:
         "network_aliases": machine.network_aliases or [],
         "detection_profile": machine.detection_profile,
         "added_by": "Platform" if machine.created_by_id else "System",
+        "source_digest": latest_version.source_digest if latest_version else None,
+        "import_version": len(machine.import_versions),
+        "last_imported_at": latest_version.imported_at.isoformat() if latest_version else None,
     }
 
 
@@ -665,9 +672,111 @@ def import_github_machine(payload: GitHubMachineImportRequest, db: Session = Dep
         **runtime,
     )
     db.add(machine)
+    db.add(MachineImportVersion(
+        machine_id=machine.id,
+        source_digest=hashlib.sha256(archive).hexdigest(),
+        repository_url=payload.repository_url,
+        repository_ref=payload.ref,
+        repository_path=payload.machine_path,
+        manifest=manifest,
+        imported_by_id=user.id,
+    ))
     db.commit()
     db.refresh(machine)
     return machine_payload(machine)
+
+
+@router.get("/admin/machines/{machine_id}/versions")
+def list_machine_versions(machine_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.admin))):
+    machine = db.get(Machine, machine_id)
+    if machine is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found.")
+    return [
+        {
+            "id": version.id,
+            "version": index,
+            "source_digest": version.source_digest,
+            "repository_url": version.repository_url,
+            "repository_ref": version.repository_ref,
+            "repository_path": version.repository_path,
+            "imported_at": version.imported_at.isoformat(),
+            "imported_by": version.imported_by.name,
+        }
+        for index, version in enumerate(machine.import_versions, start=1)
+    ]
+
+
+@router.post("/admin/machines/{machine_id}/refresh-github")
+def refresh_github_machine(machine_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.admin))):
+    machine = db.get(Machine, machine_id)
+    if machine is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found.")
+    if not machine.repository_url or not machine.repository_ref or not machine.repository_path or not machine.build_context:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only machines imported from GitHub can be refreshed.")
+    staging = IMPORTED_MACHINES_DIR / (machine.id + "-staging-" + str(uuid.uuid4()))
+    target: Path | None = None
+    backup: Path | None = None
+    swapped = False
+    try:
+        archive = download_github_archive(machine.repository_url, machine.repository_ref)
+        digest = hashlib.sha256(archive).hexdigest()
+        latest = machine.import_versions[-1] if machine.import_versions else None
+        if latest and latest.source_digest == digest:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The configured repository ref has not changed since the latest import.")
+        manifest = install_machine_archive(archive, machine.repository_path, staging)
+        duplicate = db.query(Machine).filter(Machine.name == str(manifest["name"]), Machine.id != machine.id).first()
+        if duplicate:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The refreshed manifest name belongs to another machine.")
+        target = Path(machine.build_context).resolve()
+        backup = IMPORTED_MACHINES_DIR / (machine.id + "-backup-" + str(uuid.uuid4()))
+        target.rename(backup)
+        try:
+            staging.rename(target)
+            swapped = True
+        except Exception:
+            backup.rename(target)
+            raise
+        allowed_runtime = {
+            "hostname", "command", "entrypoint", "working_dir", "run_as", "restart_policy",
+            "privileged", "tty", "stdin_open", "ports", "volumes", "environment", "labels",
+            "dns", "extra_hosts", "cap_add", "network_aliases", "detection_profile",
+        }
+        machine.name = str(manifest["name"])
+        machine.image_url = str(manifest["image"])
+        machine.os_type = str(manifest["os_type"])
+        machine.description = str(manifest["description"])
+        machine.attachments = manifest["attachments"]
+        machine.attachment = manifest["attachments"][0] if manifest["attachments"] else None
+        machine.detection_rules = manifest["detection_rules"]
+        for key in allowed_runtime:
+            if key in manifest:
+                setattr(machine, key, manifest[key])
+        db.add(MachineImportVersion(
+            machine_id=machine.id,
+            source_digest=digest,
+            repository_url=machine.repository_url,
+            repository_ref=machine.repository_ref,
+            repository_path=machine.repository_path,
+            manifest=manifest,
+            imported_by_id=user.id,
+        ))
+        db.commit()
+        db.refresh(machine)
+        shutil.rmtree(backup, ignore_errors=True)
+        return {**machine_payload(machine), "message": machine.name + " refreshed from GitHub."}
+    except HTTPException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    except MachineImportError as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        db.rollback()
+        if swapped and target is not None and backup is not None and backup.exists():
+            shutil.rmtree(target, ignore_errors=True)
+            backup.rename(target)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to refresh the GitHub machine.") from exc
 
 
 @router.patch("/admin/machines/{machine_id}")

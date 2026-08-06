@@ -266,13 +266,13 @@ def test_rendered_suricata_config_logs_http_events(client: TestClient):
     assert "enabled: yes" in config[config.index("- http:"):config.index("# ---- DNS")]
 
 
-def github_machine_archive(name: str = "Imported GitHub Target", include_dockerfile: bool = True) -> bytes:
+def github_machine_archive(name: str = "Imported GitHub Target", include_dockerfile: bool = True, description: str = "Imported from the standard machine repository layout.") -> bytes:
     files = {
         "repo-main/targets/demo/machine.json": json.dumps({
             "name": name,
             "image": "mayajal/imported-target:test",
             "os_type": "Linux",
-            "description": "Imported from the standard machine repository layout.",
+            "description": description,
             "ports": ["8080"],
             "detection": {
                 "network": {"suricata": ["detections/network/demo.rules"]},
@@ -319,6 +319,25 @@ def test_admin_imports_standard_machine_folder_from_github(client: TestClient, m
     assert body["repository_path"] == "targets/demo"
     assert body["detection_rules"]["suricata"] == ["detections/network/demo.rules"]
     assert body["detection_rules"]["logs"][0]["id"] == "MAYAJAL-APP-TEST"
+    assert body["import_version"] == 1
+    assert len(body["source_digest"]) == 64
+
+    versions = client.get(f"/admin/machines/{body['id']}/versions", headers=admin)
+    assert versions.status_code == 200
+    assert versions.json()[0]["version"] == 1
+    teacher = login(client, "teacher.asha", "Teacher!2026")
+    assert client.post(f"/admin/machines/{body['id']}/refresh-github", headers=teacher).status_code == 403
+
+    monkeypatch.setattr("api_test.frontend_contract.download_github_archive", lambda repository_url, ref: github_machine_archive(description="Refreshed repository machine definition."))
+    refreshed = client.post(f"/admin/machines/{body['id']}/refresh-github", headers=admin)
+    assert refreshed.status_code == 200
+    assert refreshed.json()["description"] == "Refreshed repository machine definition."
+    assert refreshed.json()["import_version"] == 2
+    versions = client.get(f"/admin/machines/{body['id']}/versions", headers=admin)
+    assert [item["version"] for item in versions.json()] == [1, 2]
+
+    unchanged = client.post(f"/admin/machines/{body['id']}/refresh-github", headers=admin)
+    assert unchanged.status_code == 409
 
     lab = client.post("/teacher/labs", headers=admin, json={
         "name": "Imported Detection Runtime",
