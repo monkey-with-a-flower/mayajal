@@ -274,7 +274,7 @@ def list_machines(db: Session = Depends(get_db), user: User = Depends(get_curren
 
 
 @app.post("/machines", response_model=MachineRead, status_code=status.HTTP_201_CREATED)
-def create_machine(payload: MachineCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.teacher, Role.admin))):
+def create_machine(payload: MachineCreate, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.admin))):
     if db.query(Machine).filter(Machine.name == payload.name).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A machine with this name already exists.")
     machine = Machine(**payload.model_dump(), created_by_id=user.id, approved=True)

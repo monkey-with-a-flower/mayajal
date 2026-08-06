@@ -44,7 +44,7 @@ export const roleProfiles: Record<
   teacher: {
     label: "Teacher",
     summary:
-      "Can create labs, publish scenarios, manage vulnerable machines, and review student work.",
+      "Can create labs, publish scenarios, assign learners, and review student work.",
     badge: "Builder access",
   },
   admin: {
@@ -83,7 +83,7 @@ export const permissions: Permission[] = [
   { label: "Start assigned labs", student: true, teacher: true, admin: true },
   { label: "Create personal lab scenarios", student: true, teacher: true, admin: true },
   { label: "Create classroom labs", student: false, teacher: true, admin: true },
-  { label: "Add vulnerable machines", student: false, teacher: true, admin: true },
+  { label: "Add vulnerable machines", student: false, teacher: false, admin: true },
   { label: "Edit role and user access", student: false, teacher: true, admin: true },
   { label: "Manage platform settings", student: false, teacher: true, admin: true },
 ];

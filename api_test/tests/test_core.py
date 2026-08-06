@@ -168,6 +168,25 @@ def test_teacher_assignment_controls_student_access(client: TestClient):
     assert client.post("/labs", headers=student, json={"name": "Denied", "machine_ids": [machines[0]["id"]]}).status_code == 403
 
 
+def test_only_admin_can_create_machines(client: TestClient):
+    teacher = login(client, "teacher.asha", "Teacher!2026")
+    student = login(client, "student.maya", "Student!2026")
+    payload = {
+        "name": "Role protected machine",
+        "image_url": "internal/role-protected:test",
+        "os_type": "Linux",
+        "description": "Authorization regression fixture.",
+    }
+    assert client.post("/machines", headers=teacher, json=payload).status_code == 403
+    assert client.post("/machines", headers=student, json=payload).status_code == 403
+    assert client.get("/machines", headers=teacher).status_code == 200
+
+    admin = login(client, "admin.samir", "Admin!2026")
+    created = client.post("/machines", headers=admin, json=payload)
+    assert created.status_code == 201
+    assert created.json()["name"] == payload["name"]
+
+
 def test_lab_running_state_is_scoped_to_current_user_instance(client: TestClient):
     teacher = login(client, "teacher.asha", "Teacher!2026")
     student = login(client, "student.maya", "Student!2026")
