@@ -47,12 +47,21 @@ export type ApiLab = {
   next_step: string;
   machine_ids: string[];
   tasks: string[];
+  grading_tasks?: GradingTask[];
   questions: { id: string; prompt: string; answer: string }[];
   student_ids: string[];
   group_ids: string[];
   assigned_student_ids: string[];
   assigned_count: number;
   running_sessions: number;
+};
+
+export type GradingTask = {
+  id?: string;
+  prompt: string;
+  grading_type: "exact" | "contains" | "regex" | "manual";
+  expected_answer: string;
+  points: number;
 };
 
 export type ApiStudentGroup = {
@@ -309,7 +318,7 @@ export type TeacherLabInput = {
   name: string;
   description: string;
   machine_ids: string[];
-  tasks: string[];
+  tasks: GradingTask[];
   student_ids: string[];
   group_ids: string[];
   publish: boolean;
@@ -319,10 +328,10 @@ export function createTeacherLab(apiUrl: string, lab: TeacherLabInput) {
   return request<ApiLab>(apiUrl, "/teacher/labs", { method: "POST", body: JSON.stringify(lab) });
 }
 
-export function updateTeacherLab(apiUrl: string, lab: Pick<ApiLab, "id" | "name" | "description" | "machine_ids" | "tasks" | "status" | "student_ids" | "group_ids">) {
+export function updateTeacherLab(apiUrl: string, lab: Pick<ApiLab, "id" | "name" | "description" | "machine_ids" | "grading_tasks" | "status" | "student_ids" | "group_ids">) {
   return request<ApiLab>(apiUrl, "/teacher/labs/" + lab.id, {
     method: "PATCH",
-    body: JSON.stringify({ name: lab.name, description: lab.description, machine_ids: lab.machine_ids, tasks: lab.tasks, student_ids: lab.student_ids, group_ids: lab.group_ids, publish: lab.status !== "locked" }),
+    body: JSON.stringify({ name: lab.name, description: lab.description, machine_ids: lab.machine_ids, tasks: lab.grading_tasks ?? [], student_ids: lab.student_ids, group_ids: lab.group_ids, publish: lab.status !== "locked" }),
   });
 }
 

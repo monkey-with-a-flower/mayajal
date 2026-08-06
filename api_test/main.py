@@ -51,6 +51,12 @@ MACHINE_RUNTIME_COLUMNS = {
     "detection_profile": "VARCHAR(100)",
 }
 
+TASK_GRADING_COLUMNS = {
+    "grading_type": "VARCHAR(20) DEFAULT 'manual'",
+    "expected_answer": "VARCHAR(500)",
+    "points": "INTEGER DEFAULT 1",
+}
+
 DEV_PASSWORDS = {
     "student.maya": "Student!2026",
     "teacher.asha": "Teacher!2026",
@@ -133,6 +139,10 @@ def migrate_database() -> None:
         for name, ddl in MACHINE_RUNTIME_COLUMNS.items():
             if name not in columns:
                 connection.exec_driver_sql(f"ALTER TABLE machines ADD COLUMN {name} {ddl}")
+        task_columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(lab_tasks)").all()}
+        for name, ddl in TASK_GRADING_COLUMNS.items():
+            if name not in task_columns:
+                connection.exec_driver_sql(f"ALTER TABLE lab_tasks ADD COLUMN {name} {ddl}")
         connection.exec_driver_sql("UPDATE machines SET source_type = 'dockerhub' WHERE source_type IS NULL")
         connection.exec_driver_sql("UPDATE machines SET restart_policy = 'unless-stopped' WHERE restart_policy IS NULL")
         connection.exec_driver_sql("UPDATE machines SET privileged = 0 WHERE privileged IS NULL")

@@ -24,11 +24,18 @@ class LabAnswersRequest(BaseModel):
     answers: dict[str, str]
 
 
+class TeacherTaskRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=500)
+    grading_type: str = Field(default="manual", pattern="^(exact|contains|regex|manual)$")
+    expected_answer: str | None = Field(default=None, max_length=500)
+    points: int = Field(default=1, ge=1, le=100)
+
+
 class TeacherLabRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     description: str = Field(min_length=10, max_length=1000)
     machine_ids: list[str] = Field(min_length=1)
-    tasks: list[str] = Field(default_factory=list, max_length=12)
+    tasks: list[str | TeacherTaskRequest] = Field(default_factory=list, max_length=12)
     student_ids: list[str] = Field(default_factory=list)
     group_ids: list[str] = Field(default_factory=list)
     publish: bool = True
@@ -38,7 +45,7 @@ class TeacherLabUpdateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     description: str = Field(min_length=10, max_length=1000)
     machine_ids: list[str] = Field(min_length=1)
-    tasks: list[str] = Field(default_factory=list, max_length=12)
+    tasks: list[str | TeacherTaskRequest] = Field(default_factory=list, max_length=12)
     student_ids: list[str] = Field(default_factory=list)
     group_ids: list[str] = Field(default_factory=list)
     publish: bool = True
@@ -135,7 +142,7 @@ def machine_payload(machine: Machine) -> dict:
     }
 
 
-def lab_payload(db: Session, lab: Lab, student_id: str | None = None) -> dict:
+def lab_payload(db: Session, lab: Lab, student_id: str | None = None, include_grading: bool = False) -> dict:
     if student_id:
         running = db.query(LabSession).filter(LabSession.lab_id == lab.id, LabSession.student_id == student_id, LabSession.status == SessionStatus.running).first() is not None
     else:
@@ -144,7 +151,7 @@ def lab_payload(db: Session, lab: Lab, student_id: str | None = None) -> dict:
         answer.task_id: answer.answer
         for answer in db.query(LabAnswer).filter(LabAnswer.lab_id == lab.id, LabAnswer.student_id == student_id).all()
     } if student_id else {}
-    return {
+    payload = {
         "id": lab.id,
         "name": lab.name,
         "description": lab.description,
@@ -163,6 +170,12 @@ def lab_payload(db: Session, lab: Lab, student_id: str | None = None) -> dict:
         "assigned_count": len(lab.assignments),
         "running_sessions": db.query(LabSession).filter(LabSession.lab_id == lab.id, LabSession.status == SessionStatus.running).count(),
     }
+    if include_grading:
+        payload["grading_tasks"] = [
+            {"id": task.id, "prompt": task.prompt, "grading_type": task.grading_type, "expected_answer": task.expected_answer or "", "points": task.points}
+            for task in lab.tasks
+        ]
+    return payload
 
 
 def group_payload(group: StudentGroup) -> dict:
@@ -266,8 +279,16 @@ def running_session_payload(session: LabSession) -> dict:
     }
 
 
-def replace_lab_tasks(lab: Lab, prompts: list[str]) -> None:
-    lab.tasks = [LabTask(prompt=prompt.strip(), position=index) for index, prompt in enumerate(prompts) if prompt.strip()]
+def replace_lab_tasks(lab: Lab, tasks: list[str | TeacherTaskRequest]) -> None:
+    configured: list[LabTask] = []
+    for index, item in enumerate(tasks):
+        task = TeacherTaskRequest(prompt=item) if isinstance(item, str) else item
+        prompt = task.prompt.strip()
+        expected = (task.expected_answer or "").strip() or None
+        if task.grading_type != "manual" and expected is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Automatically graded questions require an expected answer or pattern.")
+        configured.append(LabTask(prompt=prompt, position=index, grading_type=task.grading_type, expected_answer=expected, points=task.points))
+    lab.tasks = configured
 
 
 @router.get("/student/dashboard")
@@ -357,7 +378,7 @@ def teacher_dashboard(db: Session = Depends(get_db), user: User = Depends(requir
     if user.role == Role.teacher:
         running_sessions = running_sessions.join(Lab).filter(Lab.owner_id == user.id)
     return {
-        "labs": [lab_payload(db, lab, user.id) for lab in labs],
+        "labs": [lab_payload(db, lab, user.id, include_grading=True) for lab in labs],
         "machines": [machine_payload(machine) for machine in db.query(Machine).filter(Machine.approved.is_(True)).order_by(Machine.name).all()],
         "students": [student_progress_payload(db, student) for student in students],
         "groups": [group_payload(group) for group in managed_groups(db, user)],
@@ -376,7 +397,7 @@ def create_teacher_lab(payload: TeacherLabRequest, db: Session = Depends(get_db)
     replace_lab_assignments(db, lab, user, payload.student_ids, payload.group_ids)
     db.commit()
     db.refresh(lab)
-    return lab_payload(db, lab)
+    return lab_payload(db, lab, include_grading=True)
 
 
 @router.patch("/teacher/labs/{lab_id}")
@@ -394,7 +415,7 @@ def update_teacher_lab(lab_id: str, payload: TeacherLabUpdateRequest, db: Sessio
     replace_lab_assignments(db, lab, user, payload.student_ids, payload.group_ids)
     db.commit()
     db.refresh(lab)
-    return lab_payload(db, lab)
+    return lab_payload(db, lab, include_grading=True)
 
 
 @router.delete("/teacher/labs/{lab_id}")
@@ -460,7 +481,7 @@ def admin_dashboard(db: Session = Depends(get_db), user: User = Depends(require_
     students = db.query(User).filter(User.role == Role.student).count()
     teachers = db.query(User).filter(User.role == Role.teacher).count()
     return {
-        "labs": [lab_payload(db, lab, user.id) for lab in db.query(Lab).all()],
+        "labs": [lab_payload(db, lab, user.id, include_grading=True) for lab in db.query(Lab).all()],
         "machines": [machine_payload(machine) for machine in db.query(Machine).order_by(Machine.name).all()],
         "users": [{"id": member.id, "name": member.name, "username": member.username or member.email, "role": member.role.value, "status": "Active"} for member in db.query(User).order_by(User.name).all()],
         "groups": [group_payload(group) for group in db.query(StudentGroup).order_by(StudentGroup.name).all()],

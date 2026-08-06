@@ -168,6 +168,9 @@ class LabTask(Base):
     lab_id: Mapped[str] = mapped_column(ForeignKey("labs.id", ondelete="CASCADE"))
     prompt: Mapped[str] = mapped_column(String(500))
     position: Mapped[int] = mapped_column(Integer, default=0)
+    grading_type: Mapped[str] = mapped_column(String(20), default="manual")
+    expected_answer: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    points: Mapped[int] = mapped_column(Integer, default=1)
 
     lab: Mapped[Lab] = relationship(back_populates="tasks")
 

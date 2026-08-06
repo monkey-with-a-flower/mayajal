@@ -498,6 +498,39 @@ def test_teacher_can_update_and_remove_owned_dashboard_labs(client: TestClient):
     assert lab_id not in {lab["id"] for lab in client.get("/teacher/dashboard", headers=teacher).json()["labs"]}
 
 
+def test_teacher_configures_grading_without_exposing_answers_to_student(client: TestClient):
+    teacher = login(client, "teacher.asha", "Teacher!2026")
+    student = login(client, "student.maya", "Student!2026")
+    machine_id = client.get("/machines", headers=teacher).json()[0]["id"]
+    student_id = next(item for item in client.get("/students", headers=teacher).json() if item["username"] == "student.maya")["id"]
+    created = client.post("/teacher/labs", headers=teacher, json={
+        "name": "Automatically graded flags",
+        "description": "Find the hidden service flag and submit it for automatic assessment.",
+        "machine_ids": [machine_id],
+        "student_ids": [student_id],
+        "tasks": [
+            {"prompt": "Submit the service flag.", "grading_type": "exact", "expected_answer": "FLAG{SERVICE_FOUND}", "points": 10},
+            {"prompt": "Explain the evidence.", "grading_type": "manual", "expected_answer": "", "points": 5},
+        ],
+        "publish": True,
+    })
+    assert created.status_code == 201
+    assert created.json()["grading_tasks"][0]["expected_answer"] == "FLAG{SERVICE_FOUND}"
+    assert created.json()["grading_tasks"][0]["points"] == 10
+
+    student_lab = next(item for item in client.get("/student/dashboard", headers=student).json()["assignments"] if item["id"] == created.json()["id"])
+    assert "grading_tasks" not in student_lab
+    assert all("expected_answer" not in question for question in student_lab["questions"])
+
+    invalid = client.post("/teacher/labs", headers=teacher, json={
+        "name": "Invalid automatic grading",
+        "description": "This configuration intentionally omits its expected automatic answer.",
+        "machine_ids": [machine_id],
+        "tasks": [{"prompt": "Missing expected value", "grading_type": "exact", "expected_answer": "", "points": 1}],
+    })
+    assert invalid.status_code == 422
+
+
 def test_teacher_groups_control_dashboard_lab_visibility(client: TestClient):
     teacher = login(client, "teacher.asha", "Teacher!2026")
     lena = {"Authorization": "Bearer dev:student.lena"}

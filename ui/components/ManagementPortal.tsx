@@ -30,6 +30,7 @@ import {
   type ApiLabSession,
   type ApiMachine,
   type ApiStudentGroup,
+  type GradingTask,
   type MachineInput,
   type TeacherDashboard,
   type TeacherLabInput,
@@ -80,13 +81,14 @@ type LabDraft = {
   name: string;
   description: string;
   machine_ids: string[];
-  tasks: string[];
+  tasks: GradingTask[];
   student_ids: string[];
   group_ids: string[];
   status: ApiLab["status"];
 };
 
-const emptyLabDraft: LabDraft = { name: "", description: "", machine_ids: [], tasks: [""], student_ids: [], group_ids: [], status: "ready" };
+const emptyTask: GradingTask = { prompt: "", grading_type: "exact", expected_answer: "", points: 1 };
+const emptyLabDraft: LabDraft = { name: "", description: "", machine_ids: [], tasks: [{ ...emptyTask }], student_ids: [], group_ids: [], status: "ready" };
 
 function LabForm({
   machines,
@@ -119,8 +121,8 @@ function LabForm({
     onChange({ ...value, group_ids: value.group_ids.includes(id) ? value.group_ids.filter((item) => item !== id) : [...value.group_ids, id] });
   }
 
-  function updateTask(index: number, task: string) {
-    onChange({ ...value, tasks: value.tasks.map((item, itemIndex) => itemIndex === index ? task : item) });
+  function updateTask(index: number, patch: Partial<GradingTask>) {
+    onChange({ ...value, tasks: value.tasks.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) });
   }
 
   function removeTask(index: number) {
@@ -142,9 +144,9 @@ function LabForm({
     <div>
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-black text-ink">Student flags and questions</p>
-        <button type="button" onClick={() => onChange({ ...value, tasks: [...value.tasks, ""] })} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-ink/12 px-3 text-xs font-bold text-ink/65 hover:border-fern/50"><Plus size={15} />Add question</button>
+        <button type="button" onClick={() => onChange({ ...value, tasks: [...value.tasks, { ...emptyTask }] })} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-ink/12 px-3 text-xs font-bold text-ink/65 hover:border-fern/50"><Plus size={15} />Add question</button>
       </div>
-      <div className="mt-3 space-y-2">{value.tasks.map((task, index) => <div key={index} className="grid gap-2 sm:grid-cols-[auto_1fr_auto] sm:items-center"><span className="text-xs font-bold text-ink/45">#{index + 1}</span><input value={task} onChange={(event) => updateTask(index, event.target.value)} className="min-h-10 rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" placeholder="e.g. What service exposes the payroll login?" />{value.tasks.length > 1 ? <button type="button" onClick={() => removeTask(index)} className="inline-flex min-h-10 items-center justify-center rounded-md border border-clay/25 px-3 text-clay hover:bg-clay/10"><Trash2 size={16} /></button> : null}</div>)}</div>
+      <div className="mt-3 space-y-3">{value.tasks.map((task, index) => <div key={index} className="rounded-md border border-ink/10 p-3"><div className="grid gap-2 sm:grid-cols-[auto_1fr_auto] sm:items-center"><span className="text-xs font-bold text-ink/45">#{index + 1}</span><input value={task.prompt} onChange={(event) => updateTask(index, { prompt: event.target.value })} className="min-h-10 rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" placeholder="e.g. What service exposes the payroll login?" />{value.tasks.length > 1 ? <button type="button" onClick={() => removeTask(index)} className="inline-flex min-h-10 items-center justify-center rounded-md border border-clay/25 px-3 text-clay hover:bg-clay/10"><Trash2 size={16} /></button> : null}</div><div className="mt-2 grid gap-2 sm:grid-cols-[160px_1fr_100px]"><label className="text-xs font-bold text-ink/55">Grading<select value={task.grading_type} onChange={(event) => updateTask(index, { grading_type: event.target.value as GradingTask["grading_type"] })} className="mt-1 min-h-10 w-full rounded-md border border-ink/15 px-2 text-sm"><option value="exact">Exact answer</option><option value="contains">Contains text</option><option value="regex">Regular expression</option><option value="manual">Manual review</option></select></label><label className="text-xs font-bold text-ink/55">Expected answer or pattern<input value={task.expected_answer} disabled={task.grading_type === "manual"} onChange={(event) => updateTask(index, { expected_answer: event.target.value })} className="mt-1 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm disabled:bg-cloud" placeholder={task.grading_type === "regex" ? "e.g. FLAG\\{[A-Z0-9]+\\}" : "Answer hidden from students"} /></label><label className="text-xs font-bold text-ink/55">Points<input type="number" min={1} max={100} value={task.points} onChange={(event) => updateTask(index, { points: Math.max(1, Math.min(100, Number(event.target.value) || 1)) })} className="mt-1 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm" /></label></div></div>)}</div>
     </div>
     {students.length || groups.length ? <div className="grid gap-4 lg:grid-cols-2">
       <div>
@@ -194,14 +196,14 @@ function LabList({
 
   function beginEdit(lab: ApiLab) {
     setEditingId(lab.id);
-    setDraft({ name: lab.name, description: lab.description, machine_ids: lab.machine_ids, tasks: lab.tasks.length ? lab.tasks : [""], student_ids: lab.student_ids ?? [], group_ids: lab.group_ids ?? [], status: lab.status });
+    setDraft({ name: lab.name, description: lab.description, machine_ids: lab.machine_ids, tasks: lab.grading_tasks?.length ? lab.grading_tasks : lab.tasks.map((prompt) => ({ ...emptyTask, prompt })), student_ids: lab.student_ids ?? [], group_ids: lab.group_ids ?? [], status: lab.status });
   }
 
   async function save(lab: ApiLab) {
     if (!onSave || !draft.name.trim() || draft.description.trim().length < 10 || !draft.machine_ids.length) return;
     setBusyId(lab.id);
     try {
-      await onSave({ ...lab, name: draft.name.trim(), description: draft.description.trim(), machine_ids: draft.machine_ids, tasks: draft.tasks.map((task) => task.trim()).filter(Boolean), student_ids: draft.student_ids, group_ids: draft.group_ids, status: draft.status });
+      await onSave({ ...lab, name: draft.name.trim(), description: draft.description.trim(), machine_ids: draft.machine_ids, grading_tasks: draft.tasks.filter((task) => task.prompt.trim()).map((task) => ({ ...task, prompt: task.prompt.trim(), expected_answer: task.expected_answer.trim() })), student_ids: draft.student_ids, group_ids: draft.group_ids, status: draft.status });
       setEditingId(null);
     } finally {
       setBusyId(null);
@@ -290,7 +292,7 @@ function LabList({
 function TeacherPortal({ apiUrl, view }: { apiUrl: string; view: string }) {
   const [data, setData] = useState<TeacherDashboard | null>(null); const [labs, setLabs] = useState<ApiLab[]>([]); const [reviews, setReviews] = useState<TeacherDashboard["reviews"]>([]); const [groups, setGroups] = useState<ApiStudentGroup[]>([]); const [notice, setNotice] = useState(""); const [processLog, setProcessLog] = useState(""); const [newLab, setNewLab] = useState<LabDraft>(emptyLabDraft); const [saving, setSaving] = useState(false); const [groupName, setGroupName] = useState(""); const [groupStudents, setGroupStudents] = useState<string[]>([]); const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   useEffect(() => { getTeacherDashboard(apiUrl).then((dashboard) => { setData(dashboard); setLabs(dashboard.labs); setReviews(dashboard.reviews); setGroups(dashboard.groups); setNewLab((draft) => ({ ...draft, machine_ids: draft.machine_ids.length ? draft.machine_ids : dashboard.machines.slice(0, 2).map((machine) => machine.id) })); }).catch((error) => setNotice(error instanceof Error ? error.message : "Unable to load teaching workspace.")); }, [apiUrl]);
-  async function createLab(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!newLab.name.trim() || newLab.description.trim().length < 10 || !newLab.machine_ids.length) { setNotice("Add a lab name, scenario description, and at least one machine."); return; } setSaving(true); try { const payload: TeacherLabInput = { name: newLab.name.trim(), description: newLab.description.trim(), machine_ids: newLab.machine_ids, tasks: newLab.tasks.map((task) => task.trim()).filter(Boolean), student_ids: newLab.student_ids, group_ids: newLab.group_ids, publish: newLab.status !== "locked" }; const lab = await createTeacherLab(apiUrl, payload); setLabs((items) => [lab, ...items]); setNewLab({ ...emptyLabDraft, machine_ids: data?.machines.slice(0, 2).map((machine) => machine.id) ?? [] }); setNotice(lab.name + " has been created."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to create the lab."); } finally { setSaving(false); } }
+  async function createLab(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!newLab.name.trim() || newLab.description.trim().length < 10 || !newLab.machine_ids.length) { setNotice("Add a lab name, scenario description, and at least one machine."); return; } setSaving(true); try { const payload: TeacherLabInput = { name: newLab.name.trim(), description: newLab.description.trim(), machine_ids: newLab.machine_ids, tasks: newLab.tasks.filter((task) => task.prompt.trim()).map((task) => ({ ...task, prompt: task.prompt.trim(), expected_answer: task.expected_answer.trim() })), student_ids: newLab.student_ids, group_ids: newLab.group_ids, publish: newLab.status !== "locked" }; const lab = await createTeacherLab(apiUrl, payload); setLabs((items) => [lab, ...items]); setNewLab({ ...emptyLabDraft, tasks: [{ ...emptyTask }], machine_ids: data?.machines.slice(0, 2).map((machine) => machine.id) ?? [] }); setNotice(lab.name + " has been created."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to create the lab."); } finally { setSaving(false); } }
   async function saveLab(lab: ApiLab) { try { const updated = await updateTeacherLab(apiUrl, lab); setLabs((items) => items.map((item) => item.id === updated.id ? updated : item)); setNotice(updated.name + " has been updated."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to update the lab."); throw error; } }
   async function removeLab(lab: ApiLab) { try { const result = await deleteTeacherLab(apiUrl, lab.id); setLabs((items) => items.filter((item) => item.id !== lab.id)); setReviews((items) => items.filter((item) => item.lab !== lab.name)); setNotice(result.message); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to remove the lab."); throw error; } }
   async function startManagedLab(lab: ApiLab) { try { const result = await startLab(apiUrl, lab.id); setLabs((items) => items.map((item) => item.id === lab.id ? { ...item, status: "running", next_step: "Lab containers are running." } : item)); setNotice(result.message); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to start the lab."); } }
