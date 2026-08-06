@@ -530,6 +530,31 @@ def test_teacher_configures_grading_without_exposing_answers_to_student(client: 
     })
     assert invalid.status_code == 422
 
+    questions = student_lab["questions"]
+    saved = client.put(f"/student/labs/{created.json()['id']}/answers", headers=student, json={
+        "answers": {questions[0]["id"]: "FLAG{SERVICE_FOUND}", questions[1]["id"]: "Evidence from the service log."},
+    })
+    assert saved.status_code == 200
+    submitted = client.post(f"/student/labs/{created.json()['id']}/submit", headers=student)
+    assert submitted.status_code == 201
+    assert submitted.json()["auto_score"] == 10
+    assert submitted.json()["max_score"] == 15
+    assert submitted.json()["status"] == "awaiting_review"
+    assert all("expected_answer" not in result for result in submitted.json()["results"])
+    assert all("answer" not in result for result in submitted.json()["results"])
+
+    review = next(item for item in client.get("/teacher/dashboard", headers=teacher).json()["reviews"] if item["id"] == submitted.json()["id"])
+    assert review["results"][0]["answer"] == "FLAG{SERVICE_FOUND}"
+    finalized = client.post(f"/teacher/reviews/{review['id']}", headers=teacher, json={"final_score": 12, "feedback": "Good flag; add more evidence."})
+    assert finalized.status_code == 200
+    assert finalized.json()["status"] == "finalized"
+    assert finalized.json()["final_score"] == 12
+    assert client.post(f"/teacher/reviews/{review['id']}", headers=teacher, json={"final_score": 12}).status_code == 409
+
+    refreshed_lab = next(item for item in client.get("/student/dashboard", headers=student).json()["assignments"] if item["id"] == created.json()["id"])
+    assert refreshed_lab["submission_status"] == "finalized"
+    assert refreshed_lab["score"] == 12
+
 
 def test_teacher_groups_control_dashboard_lab_visibility(client: TestClient):
     teacher = login(client, "teacher.asha", "Teacher!2026")

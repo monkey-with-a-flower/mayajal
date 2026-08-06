@@ -54,6 +54,26 @@ export type ApiLab = {
   assigned_student_ids: string[];
   assigned_count: number;
   running_sessions: number;
+  submission_status: "awaiting_review" | "finalized" | null;
+  score: number | null;
+  max_score: number;
+};
+
+export type ApiSubmission = {
+  id: string;
+  lab_id: string;
+  lab: string;
+  student_id: string;
+  student: string;
+  status: "awaiting_review" | "finalized";
+  state: string;
+  auto_score: number;
+  max_score: number;
+  final_score: number | null;
+  feedback: string;
+  submitted_at: string;
+  finalized_at: string | null;
+  results: { task_id: string; prompt: string; grading_type: string; answer?: string; correct: boolean | null; points: number; awarded_points: number }[];
 };
 
 export type GradingTask = {
@@ -188,6 +208,10 @@ export function saveLabAnswers(apiUrl: string, labId: string, answers: Record<st
   });
 }
 
+export function submitLab(apiUrl: string, labId: string) {
+  return request<ApiSubmission & { message: string }>(apiUrl, "/student/labs/" + labId + "/submit", { method: "POST" });
+}
+
 async function streamRequest(apiUrl: string, path: string, onChunk: (chunk: string) => void) {
   let response: Response;
   try {
@@ -296,7 +320,7 @@ export type TeacherDashboard = {
   students: { id: string; name: string; cohort: string; active_labs: number; running_labs: number; progress: number }[];
   groups: ApiStudentGroup[];
   metrics: { students: number; labs: number; running_sessions: number };
-  reviews: { id: string; student: string; lab: string; state: string }[];
+  reviews: ApiSubmission[];
 };
 
 export type AdminDashboard = {
@@ -351,8 +375,8 @@ export function deleteTeacherGroup(apiUrl: string, groupId: string) {
   return request<{ id: string; message: string }>(apiUrl, "/teacher/groups/" + groupId, { method: "DELETE" });
 }
 
-export function completeReview(apiUrl: string, reviewId: string) {
-  return request<{ id: string; message: string }>(apiUrl, "/teacher/reviews/" + reviewId, { method: "POST" });
+export function completeReview(apiUrl: string, reviewId: string, finalScore?: number, feedback = "") {
+  return request<ApiSubmission & { message: string }>(apiUrl, "/teacher/reviews/" + reviewId, { method: "POST", body: JSON.stringify({ final_score: finalScore, feedback }) });
 }
 
 export function getAdminDashboard(apiUrl: string) {

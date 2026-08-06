@@ -159,6 +159,7 @@ class Lab(Base):
     assignments: Mapped[list["LabAssignment"]] = relationship(back_populates="lab", cascade="all, delete-orphan")
     sessions: Mapped[list["LabSession"]] = relationship(back_populates="lab", cascade="all, delete-orphan")
     tasks: Mapped[list["LabTask"]] = relationship(back_populates="lab", cascade="all, delete-orphan", order_by="LabTask.position")
+    submissions: Mapped[list["LabSubmission"]] = relationship(back_populates="lab", cascade="all, delete-orphan")
 
 
 class LabTask(Base):
@@ -185,6 +186,27 @@ class LabAnswer(Base):
     student_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     answer: Mapped[str] = mapped_column(String(4000), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class LabSubmission(Base):
+    __tablename__ = "lab_submissions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    lab_id: Mapped[str] = mapped_column(ForeignKey("labs.id", ondelete="CASCADE"))
+    student_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(32), default="awaiting_review")
+    auto_score: Mapped[int] = mapped_column(Integer, default=0)
+    max_score: Mapped[int] = mapped_column(Integer, default=0)
+    final_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    results: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    feedback: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finalized_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    lab: Mapped[Lab] = relationship(back_populates="submissions")
+    student: Mapped[User] = relationship(foreign_keys=[student_id])
+    finalized_by: Mapped[User | None] = relationship(foreign_keys=[finalized_by_id])
 
 
 class LabAssignment(Base):

@@ -3,14 +3,14 @@
 import { FormEvent, useEffect, useState } from "react";
 import clsx from "clsx";
 import { Activity, ArrowLeft, Check, ClipboardCheck, Clock3, Cpu, Download, Edit3, FileText, Layers3, LoaderCircle, Play, Plus, Save, ServerCog, ShieldCheck, Trash2, X } from "lucide-react";
-import { deleteScenario, downloadLabAttachment, getAttackReport, getLabAttachments, getLabVpn, getScenarioVpn, getStudentDashboard, listLabSessions, saveLabAnswers, saveScenario, startLab, startScenario, stopLab, stopScenario, updateScenario, type ApiLab, type ApiMachine, type ApiScenario, type AttackReport, type LabAttachment, type StudentDashboard } from "@/lib/api";
+import { deleteScenario, downloadLabAttachment, getAttackReport, getLabAttachments, getLabVpn, getScenarioVpn, getStudentDashboard, listLabSessions, saveLabAnswers, saveScenario, startLab, startScenario, stopLab, stopScenario, submitLab, updateScenario, type ApiLab, type ApiMachine, type ApiScenario, type AttackReport, type LabAttachment, type StudentDashboard } from "@/lib/api";
 
 function Panel({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
   return <section className="rounded-lg border border-ink/10 bg-white shadow-sm"><div className="border-b border-ink/10 p-4"><p className="text-xs font-bold uppercase text-ink/44">{eyebrow}</p><h2 className="mt-1 text-xl font-black text-ink">{title}</h2></div>{children}</section>;
 }
 
 function Action({ children, icon: Icon, onClick, disabled, spinning }: { children: React.ReactNode; icon: typeof Play; onClick?: () => void; disabled?: boolean; spinning?: boolean }) {
-  return <button type="button" onClick={onClick} disabled={disabled} className={clsx("inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-bold", disabled ? "cursor-not-allowed bg-ink/8 text-ink/35" : "bg-canopy text-white hover:bg-fern")}><Icon size={16} className={spinning ? "animate-spin" : undefined} />{children}</button>;
+  return <button type="button" onClick={onClick} disabled={disabled} className={clsx("inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-bold", disabled ? "cursor-not-allowed bg-ink/8 text-ink/35" : "bg-canopy text-white hover:bg-fern")}><Icon size={16} className={spinning ? "animate-spin" : undefined} />{children === "Save answers" ? "Submit lab" : children}</button>;
 }
 
 function formatAttackReport(report: AttackReport) {
@@ -30,7 +30,7 @@ function LabRows({ labs, machines, onOpen }: { labs: ApiLab[]; machines: ApiMach
   })}</div>;
 }
 
-function LabWorkspace({ apiUrl, lab, machines, busy, reportLog, onClose, onStart, onStop, onDownloadVpn, onReport, onAnswersSaved }: { apiUrl: string; lab: ApiLab; machines: ApiMachine[]; busy: boolean; reportLog: string; onClose: () => void; onStart: (lab: ApiLab) => Promise<void>; onStop: (lab: ApiLab) => Promise<void>; onDownloadVpn: (lab: ApiLab) => Promise<void>; onReport: (lab: ApiLab) => Promise<void>; onAnswersSaved: (labId: string, questions: ApiLab["questions"]) => void }) {
+function LabWorkspace({ apiUrl, lab, machines, busy, reportLog, onClose, onStart, onStop, onDownloadVpn, onReport, onAnswersSaved, onSubmitted }: { apiUrl: string; lab: ApiLab; machines: ApiMachine[]; busy: boolean; reportLog: string; onClose: () => void; onStart: (lab: ApiLab) => Promise<void>; onStop: (lab: ApiLab) => Promise<void>; onDownloadVpn: (lab: ApiLab) => Promise<void>; onReport: (lab: ApiLab) => Promise<void>; onAnswersSaved: (labId: string, questions: ApiLab["questions"]) => void; onSubmitted: (labId: string, score: number, maxScore: number) => void }) {
   const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(lab.questions.map((item) => [item.id, item.answer])));
   const [attachments, setAttachments] = useState<LabAttachment[]>([]);
   const [saving, setSaving] = useState(false);
@@ -46,9 +46,10 @@ function LabWorkspace({ apiUrl, lab, machines, busy, reportLog, onClose, onStart
   }, [apiUrl, lab.id, lab.status]);
 
   async function saveAnswers() {
+    if (!window.confirm("Submit this lab for automatic grading and teacher review?")) return;
     setSaving(true); setMessage("");
-    try { const result = await saveLabAnswers(apiUrl, lab.id, answers); onAnswersSaved(lab.id, result.questions); setMessage(result.message); }
-    catch (reason) { setMessage(reason instanceof Error ? reason.message : "Unable to save answers."); }
+    try { const result = await saveLabAnswers(apiUrl, lab.id, answers); onAnswersSaved(lab.id, result.questions); const submission = await submitLab(apiUrl, lab.id); onSubmitted(lab.id, submission.auto_score, submission.max_score); setMessage(submission.message + " Automatic score: " + submission.auto_score + "/" + submission.max_score + "."); }
+    catch (reason) { setMessage(reason instanceof Error ? reason.message : "Unable to submit the lab."); }
     finally { setSaving(false); }
   }
   async function startWorkspace() { await onStart(lab); try { setAttachments((await getLabAttachments(apiUrl, lab.id)).attachments); } catch {} }
@@ -202,6 +203,7 @@ export default function StudentPortal({ apiUrl, view }: { apiUrl: string; view: 
     setData((current) => current ? { ...current, assignments: current.assignments.map((lab) => lab.id === labId ? { ...lab, status, next_step: nextStep } : lab) } : current);
   }
   function setLabQuestions(labId: string, questions: ApiLab["questions"]) { setData((current) => current ? { ...current, assignments: current.assignments.map((lab) => lab.id === labId ? { ...lab, questions, tasks: questions.map((item) => item.prompt) } : lab) } : current); }
+  function setLabSubmission(labId: string, score: number, maxScore: number) { setData((current) => current ? { ...current, assignments: current.assignments.map((lab) => lab.id === labId ? { ...lab, submission_status: "awaiting_review", score, max_score: maxScore } : lab) } : current); }
   async function start(lab: ApiLab) { setBusyLab(lab.id); setNotice(""); try { const result = await startLab(apiUrl, lab.id); setLabStatus(lab.id, "running", "Download the VPN config and connect with WireGuard"); setNotice(result.message); } catch (reason) { setNotice(reason instanceof Error ? reason.message : "Unable to start the lab."); } finally { setBusyLab(null); } }
   async function download(lab: ApiLab) { setBusyLab(lab.id); setNotice(""); try { const result = await getLabVpn(apiUrl, lab.id); downloadConfig(result.wireguard_filename, result.wireguard_config); setLabStatus(lab.id, "running", "Download the VPN config and connect with WireGuard"); setNotice("Downloaded " + result.wireguard_filename + "."); } catch (reason) { setNotice(reason instanceof Error ? reason.message : "Unable to download the VPN config."); } finally { setBusyLab(null); } }
   async function report(lab: ApiLab) { setBusyLab(lab.id); setNotice(""); try { const sessions = await listLabSessions(apiUrl, lab.id); const latest = [...sessions].sort((left, right) => Date.parse(right.started_at) - Date.parse(left.started_at))[0]; if (!latest) { setNotice("No sessions are available for " + lab.name + "."); return; } const result = await getAttackReport(apiUrl, latest.id); setReportLog(formatAttackReport(result)); setNotice("Loaded telemetry report for " + lab.name + "."); } catch (reason) { setNotice(reason instanceof Error ? reason.message : "Unable to load telemetry report."); } finally { setBusyLab(null); } }
@@ -213,7 +215,7 @@ export default function StudentPortal({ apiUrl, view }: { apiUrl: string; view: 
   const builder = <Builder apiUrl={apiUrl} machines={data.machines} scenarios={scenarios} onSaved={(scenario) => { setScenarios((items) => [scenario, ...items]); setNotice(scenario.name + " has been saved to your workspace."); }} onUpdated={(scenario) => { setScenarios((items) => items.map((item) => item.id === scenario.id ? scenario : item)); setNotice(scenario.name + " has been updated."); }} onDeleted={(scenarioId, message) => { setScenarios((items) => items.filter((item) => item.id !== scenarioId)); setNotice(message); }} />;
   const library = <Panel eyebrow="Machine library" title="Approved environments"><div className="grid divide-y divide-ink/10 sm:grid-cols-2 sm:divide-x sm:divide-y-0">{data.machines.map((machine) => <div key={machine.id} className="p-4"><div className="flex items-center justify-between"><span className="grid h-10 w-10 place-items-center rounded-md bg-mint/20 text-canopy"><ServerCog size={19} /></span><span className="rounded-md bg-cloud px-2 py-1 text-xs font-bold text-ink/55">{machine.os_type}</span></div><p className="mt-4 text-sm font-black text-ink">{machine.name}</p><p className="mt-1 text-xs leading-5 text-ink/54">{machine.description}</p><p className="mt-3 truncate text-xs font-semibold text-fern">{machine.imageUrl}</p></div>)}</div></Panel>;
   const openLab = data.assignments.find((lab) => lab.id === openLabId);
-  const workspace = openLab ? <LabWorkspace apiUrl={apiUrl} lab={openLab} machines={data.machines} busy={busyLab === openLab.id} reportLog={reportLog} onClose={() => { setOpenLabId(null); setReportLog(""); }} onStart={start} onStop={stop} onDownloadVpn={download} onReport={report} onAnswersSaved={setLabQuestions} /> : null;
+  const workspace = openLab ? <LabWorkspace apiUrl={apiUrl} lab={openLab} machines={data.machines} busy={busyLab === openLab.id} reportLog={reportLog} onClose={() => { setOpenLabId(null); setReportLog(""); }} onStart={start} onStop={stop} onDownloadVpn={download} onReport={report} onAnswersSaved={setLabQuestions} onSubmitted={setLabSubmission} /> : null;
   if (view === "Assigned labs") return <div className="space-y-4">{workspace}{notice ? <p className="rounded-lg border border-fern/25 bg-mint/15 px-4 py-3 text-sm font-bold text-fern">{notice}</p> : null}{reportPanel}{labs}</div>;
   if (view === "My scenarios") return <div className="space-y-4">{notice ? <p className="rounded-lg border border-fern/25 bg-mint/15 px-4 py-3 text-sm font-bold text-fern">{notice}</p> : null}{builder}</div>;
   if (view === "Machine library") return library;

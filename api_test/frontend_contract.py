@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 from api_test.auth import require_roles
 from api_test.config import AUTH_MODE, IMPORTED_MACHINES_DIR
 from api_test.database import get_db
-from api_test.models import Lab, LabAnswer, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
+from api_test.models import Lab, LabAnswer, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.services import require_lab_manager, require_student_access, start_session
 from api_test.machine_import import MachineImportError, download_github_archive, install_machine_archive
 
@@ -29,6 +30,11 @@ class TeacherTaskRequest(BaseModel):
     grading_type: str = Field(default="manual", pattern="^(exact|contains|regex|manual)$")
     expected_answer: str | None = Field(default=None, max_length=500)
     points: int = Field(default=1, ge=1, le=100)
+
+
+class FinalizeSubmissionRequest(BaseModel):
+    final_score: int | None = Field(default=None, ge=0)
+    feedback: str = Field(default="", max_length=2000)
 
 
 class TeacherLabRequest(BaseModel):
@@ -151,6 +157,12 @@ def lab_payload(db: Session, lab: Lab, student_id: str | None = None, include_gr
         answer.task_id: answer.answer
         for answer in db.query(LabAnswer).filter(LabAnswer.lab_id == lab.id, LabAnswer.student_id == student_id).all()
     } if student_id else {}
+    latest_submission = (
+        db.query(LabSubmission)
+        .filter(LabSubmission.lab_id == lab.id, LabSubmission.student_id == student_id)
+        .order_by(LabSubmission.submitted_at.desc())
+        .first()
+    ) if student_id else None
     payload = {
         "id": lab.id,
         "name": lab.name,
@@ -169,6 +181,9 @@ def lab_payload(db: Session, lab: Lab, student_id: str | None = None, include_gr
         "assigned_student_ids": [assignment.student_id for assignment in lab.assignments],
         "assigned_count": len(lab.assignments),
         "running_sessions": db.query(LabSession).filter(LabSession.lab_id == lab.id, LabSession.status == SessionStatus.running).count(),
+        "submission_status": latest_submission.status if latest_submission else None,
+        "score": latest_submission.final_score if latest_submission and latest_submission.status == "finalized" else latest_submission.auto_score if latest_submission else None,
+        "max_score": latest_submission.max_score if latest_submission else sum(task.points for task in lab.tasks),
     }
     if include_grading:
         payload["grading_tasks"] = [
@@ -291,6 +306,50 @@ def replace_lab_tasks(lab: Lab, tasks: list[str | TeacherTaskRequest]) -> None:
     lab.tasks = configured
 
 
+def grade_answer(task: LabTask, answer: str) -> tuple[bool | None, int]:
+    submitted = answer.strip()
+    expected = (task.expected_answer or "").strip()
+    if task.grading_type == "manual":
+        return None, 0
+    if task.grading_type == "exact":
+        correct = submitted == expected
+    elif task.grading_type == "contains":
+        correct = expected.casefold() in submitted.casefold()
+    elif task.grading_type == "regex":
+        try:
+            correct = re.search(expected, submitted) is not None
+        except re.error:
+            correct = False
+    else:
+        correct = False
+    return correct, task.points if correct else 0
+
+
+def submission_payload(submission: LabSubmission, include_answers: bool = False) -> dict:
+    results = []
+    for result in submission.results or []:
+        item = {key: value for key, value in result.items() if key != "expected_answer"}
+        if not include_answers:
+            item.pop("answer", None)
+        results.append(item)
+    return {
+        "id": submission.id,
+        "lab_id": submission.lab_id,
+        "lab": submission.lab.name,
+        "student_id": submission.student_id,
+        "student": submission.student.name,
+        "status": submission.status,
+        "state": submission.status == "awaiting_review" and f"Automatic score {submission.auto_score}/{submission.max_score}" or "Finalized",
+        "auto_score": submission.auto_score,
+        "max_score": submission.max_score,
+        "final_score": submission.final_score,
+        "feedback": submission.feedback or "",
+        "submitted_at": submission.submitted_at.isoformat(),
+        "finalized_at": submission.finalized_at.isoformat() if submission.finalized_at else None,
+        "results": results,
+    }
+
+
 @router.get("/student/dashboard")
 def student_dashboard(db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
     assignments = db.query(Lab).join(LabAssignment).filter(LabAssignment.student_id == user.id, Lab.status == LabStatus.published).all()
@@ -341,6 +400,47 @@ def save_lab_answers(lab_id: str, payload: LabAnswersRequest, db: Session = Depe
     return {"lab_id": lab.id, "questions": lab_payload(db, lab, user.id)["questions"], "message": "Answers saved."}
 
 
+@router.post("/student/labs/{lab_id}/submit", status_code=status.HTTP_201_CREATED)
+def submit_lab(lab_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+    lab = db.get(Lab, lab_id)
+    if lab is None or lab.status != LabStatus.published:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published lab not found.")
+    require_student_access(db, user, lab)
+    if not lab.tasks:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This lab has no questions to submit.")
+    answers = {
+        answer.task_id: answer.answer
+        for answer in db.query(LabAnswer).filter(LabAnswer.lab_id == lab.id, LabAnswer.student_id == user.id).all()
+    }
+    results = []
+    auto_score = 0
+    for task in lab.tasks:
+        answer = answers.get(task.id, "")
+        correct, awarded = grade_answer(task, answer)
+        auto_score += awarded
+        results.append({
+            "task_id": task.id,
+            "prompt": task.prompt,
+            "grading_type": task.grading_type,
+            "answer": answer,
+            "expected_answer": task.expected_answer or "",
+            "correct": correct,
+            "points": task.points,
+            "awarded_points": awarded,
+        })
+    submission = LabSubmission(
+        lab_id=lab.id,
+        student_id=user.id,
+        auto_score=auto_score,
+        max_score=sum(task.points for task in lab.tasks),
+        results=results,
+    )
+    db.add(submission)
+    db.commit()
+    db.refresh(submission)
+    return {**submission_payload(submission), "message": "Lab submitted for teacher review."}
+
+
 @router.patch("/student/scenarios/{scenario_id}")
 def update_scenario(scenario_id: str, payload: ScenarioRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
     scenario = db.get(Scenario, scenario_id)
@@ -383,7 +483,12 @@ def teacher_dashboard(db: Session = Depends(get_db), user: User = Depends(requir
         "students": [student_progress_payload(db, student) for student in students],
         "groups": [group_payload(group) for group in managed_groups(db, user)],
         "metrics": {"students": len(students), "labs": len(labs), "running_sessions": running_sessions.count()},
-        "reviews": [{"id": "review-" + assignment.id, "student": assignment.student.name, "lab": assignment.lab.name, "state": "Ready for review"} for lab in labs for assignment in lab.assignments],
+        "reviews": [
+            submission_payload(submission, include_answers=True)
+            for lab in labs
+            for submission in lab.submissions
+            if submission.status == "awaiting_review"
+        ],
     }
 
 
@@ -470,9 +575,25 @@ def delete_teacher_group(group_id: str, db: Session = Depends(get_db), user: Use
     return {"id": group_id, "message": "Student group removed."}
 
 
-@router.post("/teacher/reviews/{review_id}")
-def complete_review(review_id: str, user: User = Depends(require_roles(Role.teacher, Role.admin))):
-    return {"id": review_id, "message": "Feedback recorded."}
+@router.post("/teacher/reviews/{submission_id}")
+def complete_review(submission_id: str, payload: FinalizeSubmissionRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.teacher, Role.admin))):
+    submission = db.get(LabSubmission, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found.")
+    require_lab_manager(user, submission.lab)
+    if submission.status == "finalized":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This submission has already been finalized.")
+    final_score = submission.auto_score if payload.final_score is None else payload.final_score
+    if final_score > submission.max_score:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Final score cannot exceed the available points.")
+    submission.final_score = final_score
+    submission.feedback = payload.feedback.strip() or None
+    submission.status = "finalized"
+    submission.finalized_at = datetime.now(timezone.utc)
+    submission.finalized_by_id = user.id
+    db.commit()
+    db.refresh(submission)
+    return {**submission_payload(submission, include_answers=True), "message": "Submission finalized."}
 
 
 @router.get("/admin/dashboard")
