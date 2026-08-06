@@ -12,6 +12,8 @@ ASSETS_DIR = PROJECT_DIR / "assets"
 RUNTIME_DIR = BASE_DIR / "runtime"
 LAB_RUNTIME_DIR = RUNTIME_DIR / "labs"
 LAB_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+IMPORTED_MACHINES_DIR = RUNTIME_DIR / "imported-machines"
+IMPORTED_MACHINES_DIR.mkdir(parents=True, exist_ok=True)
 MAYAJAL_MASTER_URL = os.getenv("MAYAJAL_MASTER_URL", "")
 MAYAJAL_TELEMETRY_HOST = os.getenv("MAYAJAL_TELEMETRY_HOST", "host.docker.internal")
 MAYAJAL_TELEMETRY_PORT = os.getenv("MAYAJAL_TELEMETRY_PORT", "24224")

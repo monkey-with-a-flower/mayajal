@@ -405,14 +405,19 @@ function SignIn({ onSignIn }: { onSignIn: (username: string, password: string) =
 export default function Home() {
   const [account, setAccount] = useState<Account | null>(null);
   const [apiUrl, setApiUrl] = useState("http://127.0.0.1:8001");
+  const [endpointDraft, setEndpointDraft] = useState("http://127.0.0.1:8001");
   const [activeNav, setActiveNav] = useState("My learning");
   const role = account?.role ?? "student";
 
   useEffect(() => {
     fetch("/api/runtime-config")
       .then((response) => response.json())
-      .then((config: { apiUrl?: string }) => setApiUrl(config.apiUrl ?? "Service endpoint unavailable"))
-      .catch(() => setApiUrl("Service endpoint unavailable"));
+      .then((config: { apiUrl?: string }) => {
+        const endpoint = window.localStorage.getItem("mayajal.serviceEndpoint") || config.apiUrl || "http://127.0.0.1:8001";
+        setApiUrl(endpoint);
+        setEndpointDraft(endpoint);
+      })
+      .catch(() => { const endpoint = window.localStorage.getItem("mayajal.serviceEndpoint") || "http://127.0.0.1:8001"; setApiUrl(endpoint); setEndpointDraft(endpoint); });
   }, []);
 
   const heading = useMemo(() => {
@@ -430,6 +435,14 @@ export default function Home() {
     setActiveNav(roleNavigation[result.user.role][0].label);
   }
 
+  function saveServiceEndpoint(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const endpoint = endpointDraft.trim().replace(/\/$/, "");
+    if (!/^https?:\/\//i.test(endpoint)) return;
+    window.localStorage.setItem("mayajal.serviceEndpoint", endpoint);
+    setApiUrl(endpoint);
+  }
+
   if (!account) return <SignIn onSignIn={handleSignIn} />;
 
   const Workspace = role === "student" ? StudentWorkspace : role === "teacher" ? TeacherWorkspace : AdminWorkspace;
@@ -440,7 +453,7 @@ export default function Home() {
         <aside className="border-r border-ink/10 bg-[#f8fbf8] p-5 lg:sticky lg:top-0 lg:h-screen">
           <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-lg bg-canopy text-white"><Shield size={23} /></span><div><p className="text-lg font-black text-ink">Mayajal</p><p className="text-xs font-medium text-ink/54">Cyber lab workspace</p></div></div>
           <nav className="mt-8 space-y-1">{roleNavigation[role].map((item, index) => { const Icon = item.icon; return <button type="button" key={item.label} onClick={() => setActiveNav(item.label)} className={clsx("flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-sm font-semibold", activeNav === item.label || (index === 0 && !activeNav) ? "bg-canopy text-white" : "text-ink/68 hover:bg-canopy/8 hover:text-ink")}><Icon size={18} />{item.label}</button>; })}</nav>
-          <div className="mt-8 rounded-lg border border-ink/10 bg-white p-4"><p className="text-xs font-bold uppercase text-ink/48">Service endpoint</p><p className="mt-2 break-all rounded-md bg-cloud px-3 py-2 text-xs font-semibold text-ink/70">{apiUrl}</p></div>
+          {role === "admin" ? <form onSubmit={saveServiceEndpoint} className="mt-8 rounded-lg border border-ink/10 bg-white p-4"><label className="text-xs font-bold uppercase text-ink/48">Service endpoint<input value={endpointDraft} onChange={(event) => setEndpointDraft(event.target.value)} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-xs font-semibold text-ink outline-none focus:border-fern" aria-label="Service endpoint" /></label><button type="submit" className="mt-2 min-h-9 w-full rounded-md bg-canopy px-3 text-xs font-bold text-white hover:bg-fern">Apply endpoint</button></form> : null}
           <button type="button" onClick={() => setAccount(null)} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md px-3 text-sm font-bold text-ink/62 hover:bg-ink/5"><LogOut size={17} />Sign out</button>
         </aside>
         <section className="min-w-0 p-4 sm:p-6 xl:p-8">

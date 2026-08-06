@@ -49,3 +49,34 @@ The service validates bearer tokens against the Microsoft Entra OpenID Connect s
 - GET /labs/{lab_id}/sessions
 - GET /sessions/{session_id}/telemetry
 - GET /sessions/{session_id}/attack-report
+
+## Importing vulnerable machines from GitHub
+
+An administrator can import one machine folder from a public GitHub repository:
+
+    POST /admin/machines/import-github
+    {
+      "repository_url": "https://github.com/monkey-with-a-flower/mayajal-vulnerable-machines",
+      "ref": "main",
+      "machine_path": "weak-password-login"
+    }
+
+Every machine folder must contain `machine.json` and `Dockerfile`. Put optional
+learner downloads beneath `attachments/`. The manifest requires `name`, `image`,
+`os_type`, `description`, and at least one detection declaration; it can also
+contain supported runtime fields such as `ports`, `environment`,
+`network_aliases`, and `restart_policy`.
+Imported files become that machine's Docker build context. Attachment download
+URLs are returned when the lab starts and remain authorized only while that
+user's lab session is running.
+
+Detection layout:
+
+    detections/network/*.rules          # Suricata, loaded at lab startup
+    detections/application-logs/*.json  # container/application log matcher
+    detections/system-logs/*.json       # syslog/journald/audit matcher
+
+`machine.json` selects files through `detection.network.suricata`,
+`detection.logs.application`, and `detection.logs.system`. Log rules contain an
+event field and regular expression plus their ATT&CK tactic and technique. They
+are applied to session telemetry before the attack chain is generated.

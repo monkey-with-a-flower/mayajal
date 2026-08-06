@@ -28,6 +28,8 @@ class MachineCreate(BaseModel):
     source_type: MachineSource = "dockerhub"
     os_type: str = Field(min_length=2, max_length=32)
     description: str = Field(default="", max_length=500)
+    attachment: str | None = Field(default=None, max_length=500)
+    attachments: list[str] = Field(default_factory=list, max_length=50)
     hostname: str | None = Field(default=None, max_length=160)
     command: str | None = Field(default=None, max_length=500)
     entrypoint: str | None = Field(default=None, max_length=500)
@@ -55,6 +57,13 @@ class MachineRead(BaseModel):
     source_type: str
     os_type: str
     description: str
+    attachment: str | None
+    attachments: list[str] | None
+    build_context: str | None
+    repository_url: str | None
+    repository_ref: str | None
+    repository_path: str | None
+    detection_rules: dict | None
     hostname: str | None
     command: str | None
     entrypoint: str | None

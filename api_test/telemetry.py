@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -65,14 +66,48 @@ def _event_text(event: dict[str, Any]) -> str:
     return " ".join(parts).lower()
 
 
+def _field_value(event: dict[str, Any], dotted_field: str) -> str:
+    value: Any = event
+    for part in dotted_field.split("."):
+        if not isinstance(value, dict):
+            return ""
+        value = value.get(part)
+    return "" if value is None else str(value)
+
+
+def apply_log_detection_rules(events: list[dict[str, Any]], rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for original in events:
+        event = dict(original)
+        event_source = " ".join(str(event.get(key, "")) for key in ("telemetry_source", "log_source", "tag", "source")).lower()
+        for rule in rules:
+            source = str(rule.get("source", "application"))
+            if source == "application" and any(token in event_source for token in ("suricata", "system", "syslog", "journald")):
+                continue
+            if source == "system" and not any(token in event_source for token in ("system", "syslog", "journald", "audit")):
+                continue
+            if re.search(str(rule["pattern"]), _field_value(event, str(rule["field"])), flags=re.IGNORECASE):
+                event["mayajal_detection"] = {
+                    key: rule[key]
+                    for key in ("id", "tactic", "technique_id", "technique", "rationale", "source", "rule_file")
+                    if key in rule
+                }
+                break
+        enriched.append(event)
+    return enriched
+
+
 def _classify_event(event: dict[str, Any]) -> tuple[str, str, str, str]:
+    detection = event.get("mayajal_detection") if isinstance(event.get("mayajal_detection"), dict) else None
+    if detection:
+        return (
+            str(detection["tactic"]),
+            str(detection["technique_id"]),
+            str(detection["technique"]),
+            str(detection["rationale"]),
+        )
     alert = event.get("alert") if isinstance(event.get("alert"), dict) else {}
-    signature_id = str(alert.get("signature_id") or alert.get("sid") or event.get("signature_id") or event.get("sid") or "")
-    if signature_id == "9001001":
-        return ("Credential Access", "T1110", "Brute Force", "Mayajal weak-password login rule detected repeated login attempts.")
     text = _event_text(event)
-    if "mayajal weak password login brute force attempt" in text:
-        return ("Credential Access", "T1110", "Brute Force", "Mayajal weak-password login rule detected repeated login attempts.")
     if any(token in text for token in ["nmap", "masscan", "nikto", "gobuster", "dirb", "scan", "sweep", "probe"]):
         return ("Reconnaissance", "T1595", "Active Scanning", "Scanning or probing activity was observed.")
     if any(token in text for token in ["sql injection", "sqli", "xss", "traversal", "lfi", "rfi", "exploit", "shellshock", "web attack"]):
@@ -86,7 +121,8 @@ def _classify_event(event: dict[str, Any]) -> tuple[str, str, str, str]:
     return ("Unmapped", "UNMAPPED", "Needs analyst review", "No confident ATT&CK mapping was inferred.")
 
 
-def build_attack_report(session_id: str, events: list[dict[str, Any]]) -> dict[str, Any]:
+def build_attack_report(session_id: str, events: list[dict[str, Any]], log_rules: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    events = apply_log_detection_rules(events, log_rules or [])
     phases: dict[str, dict[str, Any]] = {}
     for event in events:
         tactic, technique_id, technique, rationale = _classify_event(event)
@@ -104,14 +140,16 @@ def build_attack_report(session_id: str, events: list[dict[str, Any]]) -> dict[s
         phase["event_count"] += 1
         if len(phase["evidence"]) < 5:
             alert = event.get("alert") if isinstance(event.get("alert"), dict) else {}
+            detection = event.get("mayajal_detection") if isinstance(event.get("mayajal_detection"), dict) else {}
             phase["evidence"].append(
                 {
                     "timestamp": event.get("@timestamp") or event.get("timestamp"),
                     "source_ip": event.get("src_ip") or event.get("source_ip"),
                     "destination_ip": event.get("dest_ip") or event.get("destination_ip"),
                     "event_type": event.get("event_type") or event.get("telemetry_source"),
-                    "signature_id": alert.get("signature_id") or alert.get("sid") or event.get("signature_id") or event.get("sid"),
-                    "signature": alert.get("signature") or event.get("log") or event.get("message"),
+                    "signature_id": alert.get("signature_id") or alert.get("sid") or detection.get("id") or event.get("signature_id") or event.get("sid"),
+                    "signature": alert.get("signature") or detection.get("id") or event.get("log") or event.get("message"),
+                    "rule_file": detection.get("rule_file"),
                 }
             )
     order = ["Reconnaissance", "Initial Access", "Execution", "Persistence", "Privilege Escalation", "Defense Evasion", "Credential Access", "Discovery", "Lateral Movement", "Command and Control", "Exfiltration", "Impact", "Unmapped"]

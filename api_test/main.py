@@ -1,17 +1,20 @@
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from api_test.auth import get_current_user, require_roles
-from api_test.config import AUTH_MODE, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS
+from api_test.config import ASSETS_DIR, AUTH_MODE, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS
 from api_test.database import Base, SessionLocal, engine, get_db
 from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
-from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, SessionStatus, StudentGroup, SystemSetting, User
+from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, UserRead
 from api_test.services import require_lab_manager, require_student_access, start_session, stop_session
 from api_test.telemetry import build_attack_report, search_session_events
@@ -21,6 +24,13 @@ logger = logging.getLogger("mayajal.docker")
 
 MACHINE_RUNTIME_COLUMNS = {
     "source_type": "VARCHAR(32) DEFAULT 'dockerhub'",
+    "attachment": "VARCHAR(500)",
+    "attachments": "JSON",
+    "build_context": "VARCHAR(500)",
+    "repository_url": "VARCHAR(500)",
+    "repository_ref": "VARCHAR(200)",
+    "repository_path": "VARCHAR(500)",
+    "detection_rules": "JSON",
     "hostname": "VARCHAR(160)",
     "command": "VARCHAR(500)",
     "entrypoint": "VARCHAR(500)",
@@ -155,29 +165,18 @@ def seed_database() -> None:
             ("Kali Workstation", "kalilinux/kali-rolling", "Linux", "Attacker workstation with common security tools."),
             ("DVWA", "vulnerables/web-dvwa", "Linux", "Deliberately vulnerable web application target."),
             ("Suricata Sensor", "jasonish/suricata", "Linux", "Network inspection and alerting sensor."),
-            ("Weak Password Payroll", "mayajal/weak-password-login:demo", "Linux", "Demo payroll web app with intentionally weak credentials."),
         ]
         for name, image_url, os_type, description in machine_specs:
             existing_machine = db.query(Machine).filter(Machine.name == name).first()
             if not existing_machine:
-                detection_profile = "weak-password-login" if name == "Weak Password Payroll" else None
                 db.add(Machine(
                     name=name,
                     image_url=image_url,
-                    source_type="local" if name == "Weak Password Payroll" else "dockerhub",
+                    source_type="dockerhub",
                     os_type=os_type,
                     description=description,
-                    ports=["8080"] if name == "Weak Password Payroll" else None,
-                    network_aliases=["payroll", "weak-password-login"] if name == "Weak Password Payroll" else None,
-                    detection_profile=detection_profile,
                     created_by_id=admin.id,
                 ))
-            elif name == "Weak Password Payroll":
-                existing_machine.image_url = image_url
-                existing_machine.source_type = "local"
-                existing_machine.ports = ["8080"]
-                existing_machine.network_aliases = ["payroll", "weak-password-login"]
-                existing_machine.detection_profile = "weak-password-login"
         db.commit()
 
         setting_specs = [
@@ -384,6 +383,41 @@ def vpn_filename(lab: Lab, user: User) -> str:
     return lab.name.lower().replace(" ", "-") + "-" + username.replace(".", "-") + ".conf"
 
 
+def machine_attachment_names(machine: Machine) -> list[str]:
+    return machine.attachments or ([machine.attachment] if machine.attachment else [])
+
+
+def lab_attachment_downloads(lab: Lab) -> list[dict[str, str]]:
+    return [
+        {
+            "machine_id": machine.id,
+            "machine_name": machine.name,
+            "filename": Path(attachment).name,
+            "download_url": f"/labs/{lab.id}/machines/{machine.id}/attachments/{quote(attachment, safe='')}",
+        }
+        for machine in lab.machines
+        for attachment in machine_attachment_names(machine)
+    ]
+
+
+def machine_attachment_path(machine: Machine, attachment: str | None = None) -> Path:
+    available = machine_attachment_names(machine)
+    selected = attachment or (available[0] if available else None)
+    if not selected:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This machine does not have an attachment.")
+    if selected not in available:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine attachment not found.")
+    attachment_root = Path(machine.build_context).resolve() if machine.build_context else ASSETS_DIR.resolve()
+    attachment_path = (attachment_root / selected).resolve()
+    try:
+        attachment_path.relative_to(attachment_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine attachment not found.") from exc
+    if not attachment_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine attachment not found.")
+    return attachment_path
+
+
 async def run_stop_command(command: list[str], expose_output: bool = False) -> None:
     try:
         await run_process(command, expose_output=expose_output)
@@ -398,6 +432,86 @@ async def cleanup_lab_project(lab: Lab, project_id: str, user_id: str, session_i
     except Exception:
         logger.exception("Docker Compose cleanup failed for command: %s", " ".join(command))
         return ""
+
+
+def require_owned_scenario(db: Session, scenario_id: str, user: User) -> Scenario:
+    scenario = db.get(Scenario, scenario_id)
+    if scenario is None or scenario.student_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Personal scenario not found.")
+    if not scenario.machines:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Add at least one approved machine before starting this scenario.")
+    if any(not machine.approved for machine in scenario.machines):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This scenario contains a machine that is no longer approved.")
+    return scenario
+
+
+def stop_scenario_session(db: Session, session: ScenarioSession) -> ScenarioSession:
+    session.status = SessionStatus.stopped
+    session.stopped_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@app.post("/student/scenarios/{scenario_id}/start", status_code=status.HTTP_201_CREATED)
+async def start_personal_scenario(scenario_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+    scenario = require_owned_scenario(db, scenario_id, user)
+    project_id = instance_id(scenario, user.id)
+    existing = next((session for session in scenario.sessions if session.status == SessionStatus.running), None)
+    if existing is not None:
+        try:
+            await verify_compose_project(scenario, project_id, timeout_seconds=2)
+            config = await wait_for_wireguard_config(project_id, timeout_seconds=5)
+            return {"id": existing.id, "scenario_id": scenario.id, "status": "running", "wireguard_config": config, "wireguard_filename": vpn_filename(scenario, user), "message": scenario.name + " is already running."}
+        except Exception:
+            stop_scenario_session(db, existing)
+
+    session = ScenarioSession(id=str(uuid.uuid4()), scenario_id=scenario.id, student_id=user.id)
+    try:
+        await cleanup_lab_project(scenario, project_id, user.id, session.id)
+        command = compose_command(scenario, "start", project_id, user.id, session.id)
+        await run_process(command, expose_output=False)
+        await verify_compose_project(scenario, project_id)
+        config = await wait_for_wireguard_config(project_id)
+    except Exception as exc:
+        await cleanup_lab_project(scenario, project_id, user.id, session.id)
+        raise lab_operation_failed(exc, user) from exc
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return {"id": session.id, "scenario_id": scenario.id, "status": "running", "wireguard_config": config, "wireguard_filename": vpn_filename(scenario, user), "message": scenario.name + " is running and its VPN config is ready."}
+
+
+@app.get("/student/scenarios/{scenario_id}/vpn")
+async def get_personal_scenario_vpn(scenario_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+    scenario = require_owned_scenario(db, scenario_id, user)
+    session = next((item for item in scenario.sessions if item.status == SessionStatus.running), None)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Start the scenario before downloading its VPN config.")
+    project_id = instance_id(scenario, user.id)
+    try:
+        await verify_compose_project(scenario, project_id, timeout_seconds=2)
+        config = await wait_for_wireguard_config(project_id, timeout_seconds=5)
+    except Exception as exc:
+        stop_scenario_session(db, session)
+        raise lab_operation_failed(exc, user) from exc
+    return {"scenario_id": scenario.id, "wireguard_config": config, "wireguard_filename": vpn_filename(scenario, user)}
+
+
+@app.post("/student/scenarios/{scenario_id}/stop")
+async def stop_personal_scenario(scenario_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+    scenario = require_owned_scenario(db, scenario_id, user)
+    session = next((item for item in scenario.sessions if item.status == SessionStatus.running), None)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This scenario is not running.")
+    project_id = instance_id(scenario, user.id)
+    try:
+        command = compose_command(scenario, "stop", project_id, user.id, session.id)
+    except Exception as exc:
+        raise lab_operation_unavailable(exc, user) from exc
+    stop_scenario_session(db, session)
+    background_tasks.add_task(run_stop_command, command, False)
+    return {"id": session.id, "scenario_id": scenario.id, "status": "stopped", "stopped_at": session.stopped_at, "message": scenario.name + " has been stopped."}
 
 
 @app.post("/labs/{lab_id}/start", status_code=status.HTTP_201_CREATED)
@@ -478,6 +592,7 @@ async def start_lab(lab_id: str, stream: bool = Query(False), db: Session = Depe
         "started_at": session.started_at,
         "stopped_at": session.stopped_at,
         "message": lab.name + " VPN config is ready.",
+        "attachments": lab_attachment_downloads(lab),
     }
     if user.role == Role.admin:
         response["output"] = output + ("\n" + verification_output if existing_session is None else "")
@@ -506,6 +621,51 @@ async def get_lab_vpn(lab_id: str, db: Session = Depends(get_db), user: User = D
         "wireguard_config": config,
         "wireguard_filename": vpn_filename(lab, session_user),
     }
+
+
+@app.get("/labs/{lab_id}/machines/{machine_id}/attachment")
+def download_machine_attachment(lab_id: str, machine_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return _download_machine_attachment(lab_id, machine_id, None, db, user)
+
+
+@app.get("/labs/{lab_id}/attachments")
+def list_lab_attachments(lab_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    lab = db.get(Lab, lab_id)
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found.")
+    require_lab_operator(db, user, lab)
+    session_user = session_owner_for(user, lab)
+    running_session = next(
+        (item for item in lab.sessions if item.student_id == session_user.id and item.status == SessionStatus.running),
+        None,
+    )
+    if running_session is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Start the lab before viewing machine attachments.")
+    return {"lab_id": lab.id, "attachments": lab_attachment_downloads(lab)}
+
+
+@app.get("/labs/{lab_id}/machines/{machine_id}/attachments/{attachment:path}")
+def download_named_machine_attachment(attachment: str, lab_id: str, machine_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return _download_machine_attachment(lab_id, machine_id, attachment, db, user)
+
+
+def _download_machine_attachment(lab_id: str, machine_id: str, attachment: str | None, db: Session, user: User):
+    lab = db.get(Lab, lab_id)
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found.")
+    require_lab_operator(db, user, lab)
+    machine = next((item for item in lab.machines if item.id == machine_id), None)
+    if machine is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found in this lab.")
+    session_user = session_owner_for(user, lab)
+    running_session = next(
+        (item for item in lab.sessions if item.student_id == session_user.id and item.status == SessionStatus.running),
+        None,
+    )
+    if running_session is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Start the lab before downloading machine attachments.")
+    attachment_path = machine_attachment_path(machine, attachment)
+    return FileResponse(attachment_path, filename=attachment_path.name, media_type="text/plain")
 
 
 @app.post("/labs/{lab_id}/stop", response_model=LabSessionRead)
@@ -583,7 +743,12 @@ def get_session_attack_report(session_id: str, size: int = Query(500, ge=1, le=2
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
     require_session_operator(user, session)
     events = search_session_events(session_id, size=size)
-    return build_attack_report(session_id, events)
+    log_rules = [
+        rule
+        for machine in session.lab.machines
+        for rule in (machine.detection_rules or {}).get("logs", [])
+    ]
+    return build_attack_report(session_id, events, log_rules=log_rules)
 
 
 app.include_router(frontend_router)

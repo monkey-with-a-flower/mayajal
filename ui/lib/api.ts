@@ -11,6 +11,8 @@ export type ApiMachine = {
   os_type: string;
   imageUrl: string;
   source_type: "dockerhub" | "local" | "custom";
+  attachment: string | null;
+  attachments: string[];
   description: string;
   hostname: string | null;
   command: string | null;
@@ -45,6 +47,7 @@ export type ApiLab = {
   next_step: string;
   machine_ids: string[];
   tasks: string[];
+  questions: { id: string; prompt: string; answer: string }[];
   student_ids: string[];
   group_ids: string[];
   assigned_student_ids: string[];
@@ -63,7 +66,8 @@ export type ApiStudentGroup = {
 export type ApiScenario = {
   id: string;
   name: string;
-  status: string;
+  status: "saved" | "running";
+  running_session_id: string | null;
   machine_ids: string[];
   updated_at: string;
 };
@@ -144,11 +148,35 @@ export function getStudentDashboard(apiUrl: string) {
 }
 
 export function startLab(apiUrl: string, labId: string) {
-  return request<{ lab_id: string; status: string; message: string; wireguard_config: string; wireguard_filename: string; output?: string }>(
+  return request<{ lab_id: string; status: string; message: string; wireguard_config: string; wireguard_filename: string; attachments: LabAttachment[]; output?: string }>(
     apiUrl,
     "/labs/" + labId + "/start",
     { method: "POST" },
   );
+}
+
+export type LabAttachment = { machine_id: string; machine_name: string; filename: string; download_url: string };
+
+export function getLabAttachments(apiUrl: string, labId: string) {
+  return request<{ lab_id: string; attachments: LabAttachment[] }>(apiUrl, "/labs/" + labId + "/attachments");
+}
+
+export async function downloadLabAttachment(apiUrl: string, attachment: LabAttachment) {
+  const response = await fetch(trimUrl(apiUrl) + attachment.download_url, {
+    headers: { ...(accessToken ? { Authorization: "Bearer " + accessToken } : {}) },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail ?? "Unable to download the attachment.");
+  }
+  return { filename: attachment.filename, blob: await response.blob() };
+}
+
+export function saveLabAnswers(apiUrl: string, labId: string, answers: Record<string, string>) {
+  return request<{ lab_id: string; questions: ApiLab["questions"]; message: string }>(apiUrl, "/student/labs/" + labId + "/answers", {
+    method: "PUT",
+    body: JSON.stringify({ answers }),
+  });
 }
 
 async function streamRequest(apiUrl: string, path: string, onChunk: (chunk: string) => void) {
@@ -240,6 +268,18 @@ export function deleteScenario(apiUrl: string, scenarioId: string) {
   return request<{ id: string; message: string }>(apiUrl, "/student/scenarios/" + scenarioId, { method: "DELETE" });
 }
 
+export function startScenario(apiUrl: string, scenarioId: string) {
+  return request<{ id: string; scenario_id: string; status: "running"; wireguard_config: string; wireguard_filename: string; message: string }>(apiUrl, "/student/scenarios/" + scenarioId + "/start", { method: "POST" });
+}
+
+export function getScenarioVpn(apiUrl: string, scenarioId: string) {
+  return request<{ scenario_id: string; wireguard_config: string; wireguard_filename: string }>(apiUrl, "/student/scenarios/" + scenarioId + "/vpn");
+}
+
+export function stopScenario(apiUrl: string, scenarioId: string) {
+  return request<{ id: string; scenario_id: string; status: "stopped"; stopped_at: string; message: string }>(apiUrl, "/student/scenarios/" + scenarioId + "/stop", { method: "POST" });
+}
+
 
 export type TeacherDashboard = {
   labs: ApiLab[];
@@ -316,6 +356,7 @@ export type MachineInput = {
   source_type: "dockerhub" | "local" | "custom";
   os_type: string;
   description: string;
+  attachment?: string | null;
   hostname?: string | null;
   command?: string | null;
   entrypoint?: string | null;

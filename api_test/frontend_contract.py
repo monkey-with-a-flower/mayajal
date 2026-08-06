@@ -1,14 +1,16 @@
 from datetime import datetime, timezone
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api_test.auth import require_roles
-from api_test.config import AUTH_MODE
+from api_test.config import AUTH_MODE, IMPORTED_MACHINES_DIR
 from api_test.database import get_db
-from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, SessionStatus, StudentGroup, SystemSetting, User
-from api_test.services import require_lab_manager, start_session
+from api_test.models import Lab, LabAnswer, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
+from api_test.services import require_lab_manager, require_student_access, start_session
+from api_test.machine_import import MachineImportError, download_github_archive, install_machine_archive
 
 router = APIRouter()
 
@@ -16,6 +18,10 @@ router = APIRouter()
 class ScenarioRequest(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     machine_ids: list[str] = Field(min_length=1)
+
+
+class LabAnswersRequest(BaseModel):
+    answers: dict[str, str]
 
 
 class TeacherLabRequest(BaseModel):
@@ -49,6 +55,8 @@ class MachineRequest(BaseModel):
     source_type: str = "dockerhub"
     os_type: str = Field(min_length=2, max_length=32)
     description: str = Field(default="", max_length=500)
+    attachment: str | None = Field(default=None, max_length=500)
+    attachments: list[str] = Field(default_factory=list, max_length=50)
     hostname: str | None = Field(default=None, max_length=160)
     command: str | None = Field(default=None, max_length=500)
     entrypoint: str | None = Field(default=None, max_length=500)
@@ -67,6 +75,12 @@ class MachineRequest(BaseModel):
     cap_add: list[str] = Field(default_factory=list, max_length=24)
     network_aliases: list[str] = Field(default_factory=list, max_length=12)
     detection_profile: str | None = Field(default=None, max_length=100)
+
+
+class GitHubMachineImportRequest(BaseModel):
+    repository_url: str = Field(min_length=20, max_length=500)
+    ref: str = Field(default="main", min_length=1, max_length=200)
+    machine_path: str = Field(min_length=1, max_length=500)
 
 
 class RoleRequest(BaseModel):
@@ -93,6 +107,12 @@ def machine_payload(machine: Machine) -> dict:
         "imageUrl": machine.image_url,
         "source_type": machine.source_type,
         "description": machine.description,
+        "attachment": machine.attachment,
+        "attachments": machine.attachments or ([machine.attachment] if machine.attachment else []),
+        "repository_url": machine.repository_url,
+        "repository_ref": machine.repository_ref,
+        "repository_path": machine.repository_path,
+        "detection_rules": machine.detection_rules or {},
         "hostname": machine.hostname,
         "command": machine.command,
         "entrypoint": machine.entrypoint,
@@ -120,6 +140,10 @@ def lab_payload(db: Session, lab: Lab, student_id: str | None = None) -> dict:
         running = db.query(LabSession).filter(LabSession.lab_id == lab.id, LabSession.student_id == student_id, LabSession.status == SessionStatus.running).first() is not None
     else:
         running = db.query(LabSession).filter(LabSession.lab_id == lab.id, LabSession.status == SessionStatus.running).first() is not None
+    answers = {
+        answer.task_id: answer.answer
+        for answer in db.query(LabAnswer).filter(LabAnswer.lab_id == lab.id, LabAnswer.student_id == student_id).all()
+    } if student_id else {}
     return {
         "id": lab.id,
         "name": lab.name,
@@ -132,6 +156,7 @@ def lab_payload(db: Session, lab: Lab, student_id: str | None = None) -> dict:
         "next_step": "Download the VPN config and connect with WireGuard" if running else "Start the lab when you are ready",
         "machine_ids": [machine.id for machine in lab.machines],
         "tasks": [task.prompt for task in lab.tasks],
+        "questions": [{"id": task.id, "prompt": task.prompt, "answer": answers.get(task.id, "")} for task in lab.tasks],
         "student_ids": [student.id for student in lab.direct_students],
         "group_ids": [group.id for group in lab.groups],
         "assigned_student_ids": [assignment.student_id for assignment in lab.assignments],
@@ -151,10 +176,12 @@ def group_payload(group: StudentGroup) -> dict:
 
 
 def scenario_payload(scenario: Scenario, updated_at: str | None = None) -> dict:
+    running_session = next((session for session in scenario.sessions if session.status == SessionStatus.running), None)
     return {
         "id": scenario.id,
         "name": scenario.name,
-        "status": "saved",
+        "status": "running" if running_session else "saved",
+        "running_session_id": running_session.id if running_session else None,
         "machine_ids": [machine.id for machine in scenario.machines],
         "updated_at": updated_at or scenario.updated_at.strftime("%b %d, %H:%M"),
     }
@@ -268,11 +295,38 @@ def save_scenario(payload: ScenarioRequest, db: Session = Depends(get_db), user:
     return scenario_payload(scenario, "Just now")
 
 
+@router.put("/student/labs/{lab_id}/answers")
+def save_lab_answers(lab_id: str, payload: LabAnswersRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+    lab = db.get(Lab, lab_id)
+    if lab is None or lab.status != LabStatus.published:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published lab not found.")
+    require_student_access(db, user, lab)
+    tasks = {task.id: task for task in lab.tasks}
+    if not set(payload.answers).issubset(tasks):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Answers must target questions in this lab.")
+    existing = {
+        answer.task_id: answer
+        for answer in db.query(LabAnswer).filter(LabAnswer.lab_id == lab.id, LabAnswer.student_id == user.id).all()
+    }
+    for task_id, value in payload.answers.items():
+        answer_text = value.strip()
+        if len(answer_text) > 4000:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Each answer must be 4000 characters or fewer.")
+        if task_id in existing:
+            existing[task_id].answer = answer_text
+        else:
+            db.add(LabAnswer(lab_id=lab.id, task_id=task_id, student_id=user.id, answer=answer_text))
+    db.commit()
+    return {"lab_id": lab.id, "questions": lab_payload(db, lab, user.id)["questions"], "message": "Answers saved."}
+
+
 @router.patch("/student/scenarios/{scenario_id}")
 def update_scenario(scenario_id: str, payload: ScenarioRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
     scenario = db.get(Scenario, scenario_id)
     if scenario is None or scenario.student_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found.")
+    if any(session.status == SessionStatus.running for session in scenario.sessions):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Stop the scenario before changing its machines.")
     machines = db.query(Machine).filter(Machine.id.in_(payload.machine_ids), Machine.approved.is_(True)).all()
     if len(machines) != len(set(payload.machine_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each scenario machine must exist and be approved.")
@@ -288,6 +342,8 @@ def delete_scenario(scenario_id: str, db: Session = Depends(get_db), user: User 
     scenario = db.get(Scenario, scenario_id)
     if scenario is None or scenario.student_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scenario not found.")
+    if any(session.status == SessionStatus.running for session in scenario.sessions):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Stop the scenario before removing it.")
     db.delete(scenario)
     db.commit()
     return {"id": scenario_id, "message": "Scenario removed from your workspace."}
@@ -420,6 +476,52 @@ def create_admin_machine(payload: MachineRequest, db: Session = Depends(get_db),
     if db.query(Machine).filter(Machine.name == payload.name).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A machine with this name already exists.")
     machine = Machine(**payload.model_dump(), created_by_id=user.id, approved=True)
+    db.add(machine)
+    db.commit()
+    db.refresh(machine)
+    return machine_payload(machine)
+
+
+@router.post("/admin/machines/import-github", status_code=status.HTTP_201_CREATED)
+def import_github_machine(payload: GitHubMachineImportRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.admin))):
+    import_id = str(uuid.uuid4())
+    destination = IMPORTED_MACHINES_DIR / import_id
+    try:
+        archive = download_github_archive(payload.repository_url, payload.ref)
+        manifest = install_machine_archive(archive, payload.machine_path, destination)
+    except MachineImportError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to download the GitHub machine repository.") from exc
+    if db.query(Machine).filter(Machine.name == str(manifest["name"])).first():
+        import shutil
+        shutil.rmtree(destination, ignore_errors=True)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A machine with this name already exists.")
+    allowed_runtime = {
+        "hostname", "command", "entrypoint", "working_dir", "run_as", "restart_policy",
+        "privileged", "tty", "stdin_open", "ports", "volumes", "environment", "labels",
+        "dns", "extra_hosts", "cap_add", "network_aliases", "detection_profile",
+    }
+    runtime = {key: manifest[key] for key in allowed_runtime if key in manifest}
+    attachments = manifest["attachments"]
+    machine = Machine(
+        id=import_id,
+        name=str(manifest["name"]),
+        image_url=str(manifest["image"]),
+        source_type="local",
+        os_type=str(manifest["os_type"]),
+        description=str(manifest["description"]),
+        attachment=attachments[0] if attachments else None,
+        attachments=attachments,
+        build_context=str(destination),
+        repository_url=payload.repository_url,
+        repository_ref=payload.ref,
+        repository_path=payload.machine_path,
+        detection_rules=manifest["detection_rules"],
+        created_by_id=user.id,
+        approved=True,
+        **runtime,
+    )
     db.add(machine)
     db.commit()
     db.refresh(machine)

@@ -83,6 +83,7 @@ class User(Base):
     assignments: Mapped[list["LabAssignment"]] = relationship(back_populates="student", cascade="all, delete-orphan", foreign_keys="LabAssignment.student_id")
     sessions: Mapped[list["LabSession"]] = relationship(back_populates="student", cascade="all, delete-orphan")
     scenarios: Mapped[list["Scenario"]] = relationship(back_populates="student", cascade="all, delete-orphan")
+    scenario_sessions: Mapped[list["ScenarioSession"]] = relationship(back_populates="student", cascade="all, delete-orphan")
     owned_groups: Mapped[list["StudentGroup"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     groups: Mapped[list["StudentGroup"]] = relationship(secondary=student_group_members, back_populates="students")
 
@@ -96,6 +97,13 @@ class Machine(Base):
     source_type: Mapped[str] = mapped_column(String(32), default="dockerhub")
     os_type: Mapped[str] = mapped_column(String(32))
     description: Mapped[str] = mapped_column(String(500), default="")
+    attachment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    attachments: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    build_context: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    repository_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    repository_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    repository_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    detection_rules: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     hostname: Mapped[str | None] = mapped_column(String(160), nullable=True)
     command: Mapped[str | None] = mapped_column(String(500), nullable=True)
     entrypoint: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -164,6 +172,18 @@ class LabTask(Base):
     lab: Mapped[Lab] = relationship(back_populates="tasks")
 
 
+class LabAnswer(Base):
+    __tablename__ = "lab_answers"
+    __table_args__ = (UniqueConstraint("task_id", "student_id", name="uq_task_student_answer"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    lab_id: Mapped[str] = mapped_column(ForeignKey("labs.id", ondelete="CASCADE"))
+    task_id: Mapped[str] = mapped_column(ForeignKey("lab_tasks.id", ondelete="CASCADE"))
+    student_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    answer: Mapped[str] = mapped_column(String(4000), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
 class LabAssignment(Base):
     __tablename__ = "lab_assignments"
     __table_args__ = (UniqueConstraint("lab_id", "student_id", name="uq_lab_student"),)
@@ -204,6 +224,21 @@ class Scenario(Base):
 
     student: Mapped[User] = relationship(back_populates="scenarios")
     machines: Mapped[list[Machine]] = relationship(secondary=scenario_machines)
+    sessions: Mapped[list["ScenarioSession"]] = relationship(back_populates="scenario", cascade="all, delete-orphan")
+
+
+class ScenarioSession(Base):
+    __tablename__ = "scenario_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    scenario_id: Mapped[str] = mapped_column(ForeignKey("scenarios.id", ondelete="CASCADE"))
+    student_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus), default=SessionStatus.running)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    scenario: Mapped[Scenario] = relationship(back_populates="sessions")
+    student: Mapped[User] = relationship(back_populates="scenario_sessions")
 
 
 class SystemSetting(Base):

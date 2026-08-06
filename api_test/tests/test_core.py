@@ -1,4 +1,7 @@
 import os
+import io
+import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,7 @@ from api_test.database import Base, SessionLocal, engine
 from api_test.docker_runtime import prepare_lab_runtime
 from api_test.main import app
 from api_test.models import Lab
+from api_test.telemetry import build_attack_report
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -69,6 +73,72 @@ def test_student_only_sees_assigned_lab_and_can_manage_own_session(client: TestC
     stopped_again = client.post(f"/labs/{lab_id}/stop", headers=headers)
     assert stopped_again.status_code == 200
     assert stopped_again.json()["status"] == "stopped"
+
+
+def test_student_can_save_and_reload_answers_for_assigned_lab(client: TestClient):
+    student = login(client, "student.maya", "Student!2026")
+    dashboard = client.get("/student/dashboard", headers=student).json()
+    lab = dashboard["assignments"][0]
+    question = lab["questions"][0]
+
+    saved = client.put(f"/student/labs/{lab['id']}/answers", headers=student, json={
+        "answers": {question["id"]: "The login endpoint is exposed over HTTP."},
+    })
+    assert saved.status_code == 200
+    assert saved.json()["questions"][0]["answer"] == "The login endpoint is exposed over HTTP."
+
+    refreshed = client.get("/student/dashboard", headers=student).json()
+    refreshed_lab = next(item for item in refreshed["assignments"] if item["id"] == lab["id"])
+    assert refreshed_lab["questions"][0]["answer"] == "The login endpoint is exposed over HTTP."
+
+    unassigned_student = {"Authorization": "Bearer dev:student.lena"}
+    denied = client.put(f"/student/labs/{lab['id']}/answers", headers=unassigned_student, json={
+        "answers": {question["id"]: "Should not save"},
+    })
+    assert denied.status_code == 403
+
+
+def test_student_can_run_personal_scenario(client: TestClient):
+    student = login(client, "student.maya", "Student!2026")
+    dashboard = client.get("/student/dashboard", headers=student).json()
+    scenario = dashboard["scenarios"][0]
+
+    started = client.post(f"/student/scenarios/{scenario['id']}/start", headers=student)
+    assert started.status_code == 201
+    assert started.json()["status"] == "running"
+    assert "[Interface]" in started.json()["wireguard_config"]
+
+    refreshed = client.get("/student/dashboard", headers=student).json()
+    running = next(item for item in refreshed["scenarios"] if item["id"] == scenario["id"])
+    assert running["status"] == "running"
+    assert running["running_session_id"] == started.json()["id"]
+
+    vpn = client.get(f"/student/scenarios/{scenario['id']}/vpn", headers=student)
+    assert vpn.status_code == 200
+    assert "[Interface]" in vpn.json()["wireguard_config"]
+
+    blocked_edit = client.patch(f"/student/scenarios/{scenario['id']}", headers=student, json={
+        "name": scenario["name"],
+        "machine_ids": scenario["machine_ids"],
+    })
+    assert blocked_edit.status_code == 409
+    assert client.delete(f"/student/scenarios/{scenario['id']}", headers=student).status_code == 409
+
+    stopped = client.post(f"/student/scenarios/{scenario['id']}/stop", headers=student)
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "stopped"
+
+    refreshed = client.get("/student/dashboard", headers=student).json()
+    saved = next(item for item in refreshed["scenarios"] if item["id"] == scenario["id"])
+    assert saved["status"] == "saved"
+    assert saved["running_session_id"] is None
+
+
+def test_non_student_cannot_run_personal_scenario(client: TestClient):
+    student = login(client, "student.maya", "Student!2026")
+    scenario_id = client.get("/student/dashboard", headers=student).json()["scenarios"][0]["id"]
+    teacher = login(client, "teacher.asha", "Teacher!2026")
+    assert client.post(f"/student/scenarios/{scenario_id}/start", headers=teacher).status_code == 403
 
 
 def test_teacher_assignment_controls_student_access(client: TestClient):
@@ -154,34 +224,6 @@ def test_session_attack_report_uses_authorized_session_telemetry(client: TestCli
     assert stopped.status_code == 200
 
 
-def test_session_attack_report_maps_weak_password_bruteforce_rule(client: TestClient, monkeypatch):
-    headers = login(client, "student.maya", "Student!2026")
-    lab_id = client.get("/labs", headers=headers).json()[0]["id"]
-    started = client.post(f"/labs/{lab_id}/start", headers=headers)
-    assert started.status_code == 201
-    session_id = started.json()["id"]
-
-    monkeypatch.setattr("api_test.main.search_session_events", lambda requested_session_id, size=500: [{
-        "session_id": requested_session_id,
-        "@timestamp": "2026-07-01T00:00:00Z",
-        "event_type": "alert",
-        "src_ip": "10.66.1.2",
-        "dest_ip": "10.200.1.10",
-        "alert": {
-            "signature_id": 9001001,
-            "signature": "MAYAJAL Weak Password Login Brute Force Attempt",
-            "category": "Web Application Attack",
-        },
-    }])
-    report = client.get(f"/sessions/{session_id}/attack-report", headers=headers)
-    assert report.status_code == 200
-    assert report.json()["attack_chain"][0]["tactic"] == "Credential Access"
-    assert report.json()["attack_chain"][0]["technique_id"] == "T1110"
-    assert report.json()["attack_chain"][0]["evidence"][0]["signature_id"] == 9001001
-    stopped = client.post(f"/labs/{lab_id}/stop", headers=headers)
-    assert stopped.status_code == 200
-
-
 def test_rendered_suricata_config_logs_http_events(client: TestClient):
     headers = login(client, "student.maya", "Student!2026")
     lab_id = client.get("/labs", headers=headers).json()[0]["id"]
@@ -197,31 +239,125 @@ def test_rendered_suricata_config_logs_http_events(client: TestClient):
     assert "enabled: yes" in config[config.index("- http:"):config.index("# ---- DNS")]
 
 
-def test_rendered_lab_runtime_loads_machine_detection_rules(client: TestClient):
-    teacher = login(client, "teacher.asha", "Teacher!2026")
-    dashboard = client.get("/teacher/dashboard", headers=teacher).json()
-    payroll_machine = next(machine for machine in dashboard["machines"] if machine["name"] == "Weak Password Payroll")
-    created = client.post("/teacher/labs", headers=teacher, json={
-        "name": "Weak Password Detection Runtime",
-        "description": "Runtime should load the machine-specific brute force detection rule.",
-        "machine_ids": [payroll_machine["id"]],
-        "tasks": ["Trigger failed login attempts."],
+def github_machine_archive(name: str = "Imported GitHub Target", include_dockerfile: bool = True) -> bytes:
+    files = {
+        "repo-main/targets/demo/machine.json": json.dumps({
+            "name": name,
+            "image": "mayajal/imported-target:test",
+            "os_type": "Linux",
+            "description": "Imported from the standard machine repository layout.",
+            "ports": ["8080"],
+            "detection": {
+                "network": {"suricata": ["detections/network/demo.rules"]},
+                "logs": {"application": ["detections/application-logs/demo.json"], "system": []},
+            },
+        }).encode(),
+        "repo-main/targets/demo/attachments/wordlist.txt": b"password\nwelcome\n",
+        "repo-main/targets/demo/detections/network/demo.rules": b'alert http any any -> any any (msg:"Imported demo"; sid:9900001; rev:1;)\n',
+        "repo-main/targets/demo/detections/application-logs/demo.json": json.dumps({
+            "id": "MAYAJAL-APP-TEST",
+            "field": "log",
+            "pattern": "authentication failed",
+            "tactic": "Credential Access",
+            "technique_id": "T1110",
+            "technique": "Brute Force",
+            "rationale": "The imported application rule matched.",
+        }).encode(),
+    }
+    if include_dockerfile:
+        files["repo-main/targets/demo/Dockerfile"] = b"FROM scratch\n"
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w:gz") as archive:
+        for path, content in files.items():
+            member = tarfile.TarInfo(path)
+            member.size = len(content)
+            archive.addfile(member, io.BytesIO(content))
+    return output.getvalue()
+
+
+def test_admin_imports_standard_machine_folder_from_github(client: TestClient, monkeypatch):
+    admin = login(client, "admin.samir", "Admin!2026")
+    monkeypatch.setattr("api_test.frontend_contract.download_github_archive", lambda repository_url, ref: github_machine_archive())
+    imported = client.post("/admin/machines/import-github", headers=admin, json={
+        "repository_url": "https://github.com/example/vulnerable-machines",
+        "ref": "main",
+        "machine_path": "targets/demo",
+    })
+    assert imported.status_code == 201
+    body = imported.json()
+    assert body["name"] == "Imported GitHub Target"
+    assert body["source_type"] == "local"
+    assert body["attachments"] == ["attachments/wordlist.txt"]
+    assert body["repository_url"] == "https://github.com/example/vulnerable-machines"
+    assert body["repository_path"] == "targets/demo"
+    assert body["detection_rules"]["suricata"] == ["detections/network/demo.rules"]
+    assert body["detection_rules"]["logs"][0]["id"] == "MAYAJAL-APP-TEST"
+
+    lab = client.post("/teacher/labs", headers=admin, json={
+        "name": "Imported Detection Runtime",
+        "description": "Imported network and application detection rules load with this machine.",
+        "machine_ids": [body["id"]],
+        "tasks": ["Generate matching telemetry."],
         "publish": True,
     })
-    assert created.status_code == 201
+    assert lab.status_code == 201
     db = SessionLocal()
     try:
-        lab = db.get(Lab, created.json()["id"])
-        assert lab is not None
-        lab_dir = prepare_lab_runtime(lab, "test-weak-password-rules", "test-user", "test-session")
-        suricata_config = (lab_dir / "generated" / "suricata" / "suricata.yaml").read_text()
-        rule_file = (lab_dir / "generated" / "suricata" / "rules" / "weak-password-login.rules").read_text()
-        compose_file = (lab_dir / f"{payroll_machine['id']}.yml").read_text()
+        imported_lab = db.get(Lab, lab.json()["id"])
+        runtime = prepare_lab_runtime(imported_lab, "test-imported-detection", "test-user", "test-session")
+        suricata = (runtime / "generated" / "suricata" / "suricata.yaml").read_text()
+        imported_rule = runtime / "generated" / "suricata" / "rules" / f"machine-{body['id']}-0.rules"
     finally:
         db.close()
-    assert "- weak-password-login.rules" in suricata_config
-    assert "sid:9001001" in rule_file
-    assert "assets/machines/weak-password-login" in compose_file
+    assert imported_rule.is_file()
+    assert imported_rule.name in suricata
+
+    legacy_attachment_url = f"/labs/{lab.json()['id']}/machines/{body['id']}/attachment"
+    assert client.get(legacy_attachment_url, headers=admin).status_code == 409
+    started = client.post(f"/labs/{lab.json()['id']}/start", headers=admin)
+    assert started.status_code == 201
+    assert started.json()["attachments"][0]["filename"] == "wordlist.txt"
+    listed = client.get(f"/labs/{lab.json()['id']}/attachments", headers=admin)
+    assert listed.status_code == 200
+    assert listed.json()["attachments"] == started.json()["attachments"]
+    downloaded = client.get(started.json()["attachments"][0]["download_url"], headers=admin)
+    assert downloaded.status_code == 200
+    assert downloaded.text == "password\nwelcome\n"
+
+
+def test_github_import_rejects_machine_folder_without_dockerfile(client: TestClient, monkeypatch):
+    admin = login(client, "admin.samir", "Admin!2026")
+    monkeypatch.setattr("api_test.frontend_contract.download_github_archive", lambda repository_url, ref: github_machine_archive("Missing Dockerfile", False))
+    imported = client.post("/admin/machines/import-github", headers=admin, json={
+        "repository_url": "https://github.com/example/vulnerable-machines",
+        "ref": "main",
+        "machine_path": "targets/demo",
+    })
+    assert imported.status_code == 400
+    assert "Dockerfile" in imported.json()["detail"]
+
+
+def test_imported_application_log_rule_maps_attack_chain():
+    report = build_attack_report("log-rule-session", [{
+        "@timestamp": "2026-07-01T00:00:00Z",
+        "telemetry_source": "container",
+        "log": "authentication failed for admin",
+    }], log_rules=[{
+        "id": "MAYAJAL-APP-TEST",
+        "field": "log",
+        "pattern": "authentication failed",
+        "source": "application",
+        "rule_file": "detections/application-logs/demo.json",
+        "tactic": "Credential Access",
+        "technique_id": "T1110",
+        "technique": "Brute Force",
+        "rationale": "The imported application rule matched.",
+    }])
+    phase = report["attack_chain"][0]
+    assert phase["tactic"] == "Credential Access"
+    assert phase["technique_id"] == "T1110"
+    assert phase["evidence"][0]["signature_id"] == "MAYAJAL-APP-TEST"
+    assert phase["evidence"][0]["rule_file"] == "detections/application-logs/demo.json"
 
 
 def test_rendered_wireguard_template_preserves_peer_source_ip(client: TestClient):

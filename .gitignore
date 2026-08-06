@@ -17,10 +17,6 @@ wheels/
 db
 labs
 machines
-!assets/machines/
-!assets/machines/weak-password-login/
-!assets/machines/weak-password-login/Dockerfile
-!assets/machines/weak-password-login/app.py
 api_test/runtime/
 api_test/tests/test_mayajal.db
 test
