@@ -49,6 +49,11 @@ The service validates bearer tokens against the Microsoft Entra OpenID Connect s
 - GET /labs/{lab_id}/sessions
 - GET /sessions/{session_id}/telemetry
 - GET /sessions/{session_id}/attack-report
+- GET /sessions/{session_id}/attack-report.pdf
+
+The PDF endpoint returns an authorized, downloadable attack-chain report with
+session metadata, the executive summary, ordered ATT&CK phases, technique IDs,
+event counts, evidence samples, and analyst notes.
 
 ## Importing vulnerable machines from GitHub
 

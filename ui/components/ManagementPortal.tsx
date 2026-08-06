@@ -12,6 +12,7 @@ import {
   createTeacherLab,
   deleteTeacherGroup,
   deleteTeacherLab,
+  downloadAttackReport,
   getAdminDashboard,
   getAttackReport,
   getLabVpn,
@@ -48,6 +49,15 @@ function Notice({ text }: { text: string }) { return text ? <p className="mb-5 r
 
 function downloadConfig(filename: string, config: string) {
   const url = URL.createObjectURL(new Blob([config], { type: "text/plain" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -298,7 +308,7 @@ function TeacherPortal({ apiUrl, view }: { apiUrl: string; view: string }) {
   async function startManagedLab(lab: ApiLab) { try { const result = await startLab(apiUrl, lab.id); setLabs((items) => items.map((item) => item.id === lab.id ? { ...item, status: "running", next_step: "Lab containers are running." } : item)); setNotice(result.message); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to start the lab."); } }
   async function stopManagedLab(lab: ApiLab) { try { await stopLab(apiUrl, lab.id); setLabs((items) => items.map((item) => item.id === lab.id ? { ...item, status: "ready", next_step: "Start the lab when you are ready" } : item)); setNotice(lab.name + " has been stopped."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to stop the lab."); } }
   async function downloadManagedVpn(lab: ApiLab) { try { const result = await getLabVpn(apiUrl, lab.id); downloadConfig(result.wireguard_filename, result.wireguard_config); setNotice("Downloaded " + result.wireguard_filename + "."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to download the VPN config."); } }
-  async function loadManagedReport(lab: ApiLab) { try { const latest = latestSession(await listLabSessions(apiUrl, lab.id)); if (!latest) { setNotice("No sessions are available for " + lab.name + "."); return; } const report = await getAttackReport(apiUrl, latest.id); setProcessLog(formatAttackReport(report)); setNotice("Loaded telemetry report for " + lab.name + "."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to load telemetry report."); } }
+  async function loadManagedReport(lab: ApiLab) { try { const latest = latestSession(await listLabSessions(apiUrl, lab.id)); if (!latest) { setNotice("No sessions are available for " + lab.name + "."); return; } const [report, pdfDocument] = await Promise.all([getAttackReport(apiUrl, latest.id), downloadAttackReport(apiUrl, latest.id)]); setProcessLog(formatAttackReport(report)); downloadBlob(pdfDocument.filename, pdfDocument.blob); setNotice("Downloaded " + pdfDocument.filename + "."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to generate the attack-chain PDF report."); } }
   async function review(id: string) { const item = reviews.find((candidate) => candidate.id === id); if (!item) return; const scoreText = window.prompt("Final score out of " + item.max_score, String(item.auto_score)); if (scoreText === null) return; const score = Number(scoreText); if (!Number.isInteger(score) || score < 0 || score > item.max_score) { setNotice("Enter a whole-number score between 0 and " + item.max_score + "."); return; } const feedback = window.prompt("Teacher feedback (optional)", item.feedback) ?? ""; try { const result = await completeReview(apiUrl, id, score, feedback); setReviews((items) => items.filter((reviewItem) => reviewItem.id !== id)); setNotice(result.message); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to finalize the submission."); } }
   function toggleGroupStudent(id: string) { setGroupStudents((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id]); }
   function editGroup(group: ApiStudentGroup) { setEditingGroupId(group.id); setGroupName(group.name); setGroupStudents(group.student_ids); }
@@ -496,7 +506,7 @@ function AdminPortal({ apiUrl, view }: { apiUrl: string; view: string }) {
   async function startManagedLab(lab: ApiLab) { setProcessLog(""); setNotice("Starting " + lab.name + "..."); try { await startLabStream(apiUrl, lab.id, (chunk) => setProcessLog((value) => value + chunk)); setLabs((items) => items.map((item) => item.id === lab.id ? { ...item, status: "running", next_step: "Lab containers are running." } : item)); setNotice(lab.name + " is running."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to start the lab."); } }
   async function stopManagedLab(lab: ApiLab) { setProcessLog(""); setNotice("Stopping " + lab.name + "..."); try { await stopLabStream(apiUrl, lab.id, (chunk) => setProcessLog((value) => value + chunk)); setLabs((items) => items.map((item) => item.id === lab.id ? { ...item, status: "ready", next_step: "Start the lab when you are ready" } : item)); setNotice(lab.name + " has been stopped."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to stop the lab."); } }
   async function downloadManagedVpn(lab: ApiLab) { try { const result = await getLabVpn(apiUrl, lab.id); downloadConfig(result.wireguard_filename, result.wireguard_config); setNotice("Downloaded " + result.wireguard_filename + "."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to download the VPN config."); } }
-  async function loadManagedReport(lab: ApiLab) { try { const latest = latestSession(await listLabSessions(apiUrl, lab.id)); if (!latest) { setNotice("No sessions are available for " + lab.name + "."); return; } const report = await getAttackReport(apiUrl, latest.id); setProcessLog(formatAttackReport(report)); setNotice("Loaded telemetry report for " + lab.name + "."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to load telemetry report."); } }
+  async function loadManagedReport(lab: ApiLab) { try { const latest = latestSession(await listLabSessions(apiUrl, lab.id)); if (!latest) { setNotice("No sessions are available for " + lab.name + "."); return; } const [report, pdfDocument] = await Promise.all([getAttackReport(apiUrl, latest.id), downloadAttackReport(apiUrl, latest.id)]); setProcessLog(formatAttackReport(report)); downloadBlob(pdfDocument.filename, pdfDocument.blob); setNotice("Downloaded " + pdfDocument.filename + "."); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to generate the attack-chain PDF report."); } }
   if (!data) return <p className="rounded-lg border border-ink/10 bg-white p-8 text-center text-sm font-semibold text-ink/58">Loading platform controls...</p>;
   if (view === "Machine fleet") return <div><Notice text={notice} /><Panel eyebrow="Machine fleet" title={editingMachineId ? "Edit machine image" : "Approve a machine image"}><MachineForm value={machineDraft} onChange={setMachineDraft} onSubmit={saveMachine} submitLabel={editingMachineId ? "Save machine" : "Add machine"} onCancel={editingMachineId ? cancelMachineEdit : undefined} /><div className="grid divide-y divide-ink/10 sm:grid-cols-2 sm:divide-x sm:divide-y-0">{machines.map((machine) => <MachineCard key={machine.id} machine={machine} onEdit={editMachine} />)}</div></Panel></div>;
   if (view === "Access control") return <div><Notice text={notice} /><Panel eyebrow="Users and roles" title="Account directory"><div className="divide-y divide-ink/10">{users.map((user) => <div key={user.id} className="grid gap-3 p-4 sm:grid-cols-[1fr_150px_auto] sm:items-center"><div><p className="text-sm font-black text-ink">{user.name}</p><p className="mt-1 text-xs text-ink/54">{user.username}</p></div><select value={user.role} onChange={(event) => updateRole(user.id, event.target.value as "student" | "teacher" | "admin")} className="min-h-10 rounded-md border border-ink/15 px-3 text-sm font-semibold outline-none focus:border-fern"><option value="student">Student</option><option value="teacher">Teacher</option><option value="admin">Administrator</option></select><span className="text-xs font-bold text-fern">{user.status}</span></div>)}</div></Panel></div>;

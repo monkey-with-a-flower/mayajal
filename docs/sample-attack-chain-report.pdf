@@ -1,0 +1,78 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 2857 >>
+stream
+BT /F2 18 Tf 46 796 Td (MAYAJAL ATTACK-CHAIN REPORT) Tj ET
+BT /F1 10 Tf 46 772 Td (Authorized cyber-lab telemetry reconstruction) Tj ET
+BT /F1 6 Tf 46 752 Td () Tj ET
+BT /F2 11 Tf 46 742 Td (REPORT OVERVIEW) Tj ET
+BT /F1 9 Tf 46 720 Td (Lab: Web Exploit Basics) Tj ET
+BT /F1 9 Tf 46 706 Td (Student: Maya Patel) Tj ET
+BT /F1 9 Tf 46 692 Td (Session ID: sample-session-2026-001) Tj ET
+BT /F1 9 Tf 46 678 Td (Session started: 2026-08-06 09:10:00 UTC) Tj ET
+BT /F1 9 Tf 46 664 Td (Session stopped: 2026-08-06 09:25:00 UTC) Tj ET
+BT /F1 9 Tf 46 650 Td (Report generated: 2026-08-06 10:30:00 UTC) Tj ET
+BT /F1 9 Tf 46 636 Td (Telemetry events analyzed: 17) Tj ET
+BT /F1 6 Tf 46 622 Td () Tj ET
+BT /F2 11 Tf 46 612 Td (EXECUTIVE SUMMARY) Tj ET
+BT /F1 9 Tf 46 590 Td (Reconstructed 3 ATT&CK phases from 17 telemetry events. Activity progressed from service) Tj ET
+BT /F1 9 Tf 46 576 Td (discovery through exploitation and command execution.) Tj ET
+BT /F1 6 Tf 46 562 Td () Tj ET
+BT /F2 11 Tf 46 552 Td (ATT&CK CHAIN) Tj ET
+BT /F2 10 Tf 46 530 Td (1. Reconnaissance  |  T1595  |  Active Scanning) Tj ET
+BT /F1 9 Tf 46 512 Td (Observed events: 8) Tj ET
+BT /F1 9 Tf 46 498 Td (Assessment: Scanning and HTTP probing identified the exposed service.) Tj ET
+BT /F2 9 Tf 46 484 Td (Evidence samples) Tj ET
+BT /F1 8 Tf 46 469 Td (- 2026-08-06 09:12:15 UTC | alert | 10.65.42.2 -> 10.204.31.10 | ET SCAN Nmap Scripting Engine User-Agent) Tj ET
+BT /F1 8 Tf 46 457 Td (Detected) Tj ET
+BT /F1 6 Tf 46 445 Td () Tj ET
+BT /F2 10 Tf 46 435 Td (2. Initial Access  |  T1190  |  Exploit Public-Facing Application) Tj ET
+BT /F1 9 Tf 46 417 Td (Observed events: 7) Tj ET
+BT /F1 9 Tf 46 403 Td (Assessment: Exploit-like input targeted the vulnerable login endpoint.) Tj ET
+BT /F2 9 Tf 46 389 Td (Evidence samples) Tj ET
+BT /F1 8 Tf 46 374 Td (- 2026-08-06 09:16:15 UTC | alert | 10.65.42.2 -> 10.204.31.10 | Mayajal SQL injection attempt against login) Tj ET
+BT /F1 8 Tf 46 362 Td (form) Tj ET
+BT /F1 6 Tf 46 350 Td () Tj ET
+BT /F2 10 Tf 46 340 Td (3. Execution  |  T1059  |  Command and Scripting Interpreter) Tj ET
+BT /F1 9 Tf 46 322 Td (Observed events: 6) Tj ET
+BT /F1 9 Tf 46 308 Td (Assessment: Application telemetry recorded shell execution following exploitation.) Tj ET
+BT /F2 9 Tf 46 294 Td (Evidence samples) Tj ET
+BT /F1 8 Tf 46 279 Td (- 2026-08-06 09:20:15 UTC | alert | 10.65.42.2 -> 10.204.31.10 | Command executed: id && uname -a) Tj ET
+BT /F1 6 Tf 46 267 Td () Tj ET
+BT /F2 11 Tf 46 257 Td (ANALYST NOTES) Tj ET
+BT /F1 9 Tf 46 235 Td (This report is an automated reconstruction from lab telemetry. ATT&CK mappings indicate) Tj ET
+BT /F1 9 Tf 46 221 Td (observed behavior and should be reviewed alongside the original events before drawing) Tj ET
+BT /F1 9 Tf 46 207 Td (operational conclusions.) Tj ET
+BT /F1 8 Tf 46 28 Td (Mayajal internal report | Page 1 of 1) Tj ET
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000191 00000 n 
+0000000266 00000 n 
+0000000402 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+3310
+%%EOF

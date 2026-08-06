@@ -220,6 +220,14 @@ def test_session_attack_report_uses_authorized_session_telemetry(client: TestCli
     assert report.json()["session_id"] == session_id
     assert report.json()["attack_chain"][0]["tactic"] == "Reconnaissance"
     assert report.json()["attack_chain"][0]["technique_id"] == "T1595"
+    pdf = client.get(f"/sessions/{session_id}/attack-report.pdf", headers=headers)
+    assert pdf.status_code == 200
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.headers["content-disposition"].endswith('.pdf"')
+    assert pdf.content.startswith(b"%PDF-1.4")
+    assert b"MAYAJAL ATTACK-CHAIN REPORT" in pdf.content
+    assert b"Reconnaissance" in pdf.content
+    assert client.get(f"/sessions/{session_id}/attack-report.pdf", headers={"Authorization": "Bearer dev:student.lena"}).status_code == 403
     stopped = client.post(f"/labs/{lab_id}/stop", headers=headers)
     assert stopped.status_code == 200
 

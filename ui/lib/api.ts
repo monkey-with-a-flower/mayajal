@@ -283,6 +283,19 @@ export function getAttackReport(apiUrl: string, sessionId: string) {
   return request<AttackReport>(apiUrl, "/sessions/" + sessionId + "/attack-report");
 }
 
+export async function downloadAttackReport(apiUrl: string, sessionId: string) {
+  const response = await fetch(trimUrl(apiUrl) + "/sessions/" + sessionId + "/attack-report.pdf", {
+    headers: { ...(accessToken ? { Authorization: "Bearer " + accessToken } : {}) },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail ?? "Unable to generate the attack-chain PDF report.");
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? "mayajal-attack-report.pdf";
+  return { filename, blob: await response.blob() };
+}
+
 export function saveScenario(apiUrl: string, name: string, machineIds: string[]) {
   return request<ApiScenario>(apiUrl, "/student/scenarios", {
     method: "POST",

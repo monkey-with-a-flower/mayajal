@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from api_test.auth import get_current_user, require_roles
@@ -15,6 +16,7 @@ from api_test.config import ASSETS_DIR, AUTH_MODE, MAYAJAL_CORS_ORIGIN_REGEX, MA
 from api_test.database import Base, SessionLocal, engine, get_db
 from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
 from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
+from api_test.pdf_report import render_attack_report_pdf
 from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, UserRead
 from api_test.services import require_lab_manager, require_student_access, start_session, stop_session
 from api_test.telemetry import build_attack_report, search_session_events
@@ -759,6 +761,34 @@ def get_session_attack_report(session_id: str, size: int = Query(500, ge=1, le=2
         for rule in (machine.detection_rules or {}).get("logs", [])
     ]
     return build_attack_report(session_id, events, log_rules=log_rules)
+
+
+@app.get("/sessions/{session_id}/attack-report.pdf")
+def download_session_attack_report(session_id: str, size: int = Query(500, ge=1, le=2000), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    session = db.get(LabSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
+    require_session_operator(user, session)
+    events = search_session_events(session_id, size=size)
+    log_rules = [
+        rule
+        for machine in session.lab.machines
+        for rule in (machine.detection_rules or {}).get("logs", [])
+    ]
+    report = build_attack_report(session_id, events, log_rules=log_rules)
+    document = render_attack_report_pdf(report, {
+        "lab_name": session.lab.name,
+        "student_name": session.student.name,
+        "started_at": session.started_at.isoformat(),
+        "stopped_at": session.stopped_at.isoformat() if session.stopped_at else None,
+    })
+    safe_lab_name = re.sub(r"[^a-zA-Z0-9_-]+", "-", session.lab.name).strip("-").lower() or "lab"
+    filename = f"mayajal-{safe_lab_name}-{session.id[:8]}-attack-report.pdf"
+    return Response(
+        content=document,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 app.include_router(frontend_router)
