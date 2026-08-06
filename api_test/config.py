@@ -21,6 +21,9 @@ MAYAJAL_OPENSEARCH_URL = os.getenv("MAYAJAL_OPENSEARCH_URL", "http://127.0.0.1:9
 MAYAJAL_OPENSEARCH_INDEX = os.getenv("MAYAJAL_OPENSEARCH_INDEX", "mayajal-logs-*")
 MAYAJAL_CORS_ORIGINS = [origin.strip() for origin in os.getenv("MAYAJAL_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if origin.strip()]
 MAYAJAL_CORS_ORIGIN_REGEX = os.getenv("MAYAJAL_CORS_ORIGIN_REGEX", r"^http://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?$")
+MAYAJAL_SESSION_MAX_MINUTES = max(5, int(os.getenv("MAYAJAL_SESSION_MAX_MINUTES", "120")))
+MAYAJAL_MIN_FREE_DISK_GB = max(0.1, float(os.getenv("MAYAJAL_MIN_FREE_DISK_GB", "2")))
+MAYAJAL_MIN_AVAILABLE_MEMORY_MB = max(64, int(os.getenv("MAYAJAL_MIN_AVAILABLE_MEMORY_MB", "512")))
 
 
 def require_entra_config() -> None:

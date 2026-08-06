@@ -2,6 +2,7 @@ import os
 import io
 import json
 import tarfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ os.environ["AUTH_MODE"] = "dev"
 from api_test.database import Base, SessionLocal, engine
 from api_test.docker_runtime import prepare_lab_runtime
 from api_test.main import app
-from api_test.models import Lab
+from api_test.models import Lab, LabSession
 from api_test.telemetry import build_attack_report
 
 
@@ -217,6 +218,35 @@ def test_stop_returns_clean_state_when_shutdown_command_fails(client: TestClient
     stopped = client.post(f"/labs/{lab_id}/stop", headers=headers)
     assert stopped.status_code == 200
     assert stopped.json()["status"] == "stopped"
+
+
+def test_runtime_capacity_and_expiry_safety(client: TestClient, monkeypatch):
+    student = login(client, "student.maya", "Student!2026")
+    lab_id = client.get("/labs", headers=student).json()[0]["id"]
+
+    def reject_capacity():
+        raise HTTPException(status_code=503, detail="The lab host does not have enough free disk or memory to start another environment.")
+
+    monkeypatch.setattr("api_test.main.require_host_capacity", reject_capacity)
+    rejected = client.post(f"/labs/{lab_id}/start", headers=student)
+    assert rejected.status_code == 503
+
+    monkeypatch.setattr("api_test.main.require_host_capacity", lambda: {"safe": True})
+    started = client.post(f"/labs/{lab_id}/start", headers=student)
+    assert started.status_code == 201
+    db = SessionLocal()
+    try:
+        session = db.get(LabSession, started.json()["id"])
+        assert session.expires_at is not None
+        session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    finally:
+        db.close()
+
+    admin = login(client, "admin.samir", "Admin!2026")
+    cleanup = client.post("/admin/runtime/cleanup-expired", headers=admin)
+    assert cleanup.status_code == 200
+    assert started.json()["id"] in cleanup.json()["cleaned"]
 
 
 def test_session_attack_report_uses_authorized_session_telemetry(client: TestClient, monkeypatch):

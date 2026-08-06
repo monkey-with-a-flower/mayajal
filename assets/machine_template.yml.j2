@@ -57,6 +57,8 @@ services:
     stdin_open: true
     {% endif %}
     tty: {{ tty | lower }}
+    mem_limit: {{ memory_limit | tojson }}
+    cpus: {{ cpu_limit }}
     {% if dns %}
     dns:
     {% for item in dns %}

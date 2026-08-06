@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from api_test.models import Lab, LabAssignment, LabSession, Role, SessionStatus, User
+from api_test.config import MAYAJAL_SESSION_MAX_MINUTES
 
 
 def can_manage_lab(user: User, lab: Lab) -> bool:
@@ -27,7 +28,8 @@ def start_session(db: Session, lab: Lab, student: User, session_id: str | None =
     existing = db.query(LabSession).filter(LabSession.lab_id == lab.id, LabSession.student_id == student.id, LabSession.status == SessionStatus.running).first()
     if existing:
         return existing
-    session = LabSession(id=session_id, lab_id=lab.id, student_id=student.id, status=SessionStatus.running) if session_id else LabSession(lab_id=lab.id, student_id=student.id, status=SessionStatus.running)
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=MAYAJAL_SESSION_MAX_MINUTES)
+    session = LabSession(id=session_id, lab_id=lab.id, student_id=student.id, status=SessionStatus.running, expires_at=expiry) if session_id else LabSession(lab_id=lab.id, student_id=student.id, status=SessionStatus.running, expires_at=expiry)
     db.add(session)
     db.flush()
     session.access_url = f"https://labs.mayajal.local/sessions/{session.id}"

@@ -292,6 +292,8 @@ def prepare_lab_runtime(lab: Lab, project_id: str, peer_id: str, session_id: str
                 tty=machine.tty,
                 stdin_open=machine.stdin_open,
                 restart_policy=machine.restart_policy or "unless-stopped",
+                memory_limit=machine.memory_limit or "512m",
+                cpu_limit=machine.cpu_limit or 1.0,
             )
         )
     return lab_dir

@@ -23,7 +23,12 @@ Useful environment overrides:
     MAYAJAL_OPENSEARCH_URL=http://127.0.0.1:9200
     MAYAJAL_OPENSEARCH_INDEX=mayajal-logs-*
     MAYAJAL_TELEMETRY_HOST=host.docker.internal
-    MAYAJAL_TELEMETRY_PORT=24224
+MAYAJAL_TELEMETRY_PORT=24224
+
+Runtime safety defaults can be tuned with `MAYAJAL_SESSION_MAX_MINUTES`,
+`MAYAJAL_MIN_FREE_DISK_GB`, and `MAYAJAL_MIN_AVAILABLE_MEMORY_MB`. New machine
+definitions default to one CPU and 512 MB RAM. Administrators can run
+`POST /admin/runtime/cleanup-expired` to stop and record overdue environments.
 
 ## Development accounts
 

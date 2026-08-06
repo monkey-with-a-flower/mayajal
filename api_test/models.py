@@ -122,6 +122,8 @@ class Machine(Base):
     cap_add: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     network_aliases: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     detection_profile: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    memory_limit: Mapped[str] = mapped_column(String(32), default="512m")
+    cpu_limit: Mapped[float] = mapped_column(default=1.0)
     approved: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -251,6 +253,8 @@ class LabSession(Base):
     access_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cleanup_status: Mapped[str] = mapped_column(String(32), default="active")
 
     lab: Mapped[Lab] = relationship(back_populates="sessions")
     student: Mapped[User] = relationship(back_populates="sessions")
@@ -279,6 +283,8 @@ class ScenarioSession(Base):
     status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus), default=SessionStatus.running)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cleanup_status: Mapped[str] = mapped_column(String(32), default="active")
 
     scenario: Mapped[Scenario] = relationship(back_populates="sessions")
     student: Mapped[User] = relationship(back_populates="scenario_sessions")

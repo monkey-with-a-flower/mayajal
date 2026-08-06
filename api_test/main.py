@@ -2,7 +2,7 @@ import logging
 import re
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -12,11 +12,12 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from api_test.auth import get_current_user, require_roles
-from api_test.config import ASSETS_DIR, AUTH_MODE, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS
+from api_test.config import ASSETS_DIR, AUTH_MODE, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS, MAYAJAL_SESSION_MAX_MINUTES
 from api_test.database import Base, SessionLocal, engine, get_db
 from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
 from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.pdf_report import render_attack_report_pdf
+from api_test.runtime_safety import host_capacity, require_host_capacity
 from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, UserRead
 from api_test.services import require_lab_manager, require_student_access, start_session, stop_session
 from api_test.telemetry import build_attack_report, search_session_events
@@ -51,6 +52,8 @@ MACHINE_RUNTIME_COLUMNS = {
     "cap_add": "JSON",
     "network_aliases": "JSON",
     "detection_profile": "VARCHAR(100)",
+    "memory_limit": "VARCHAR(32) DEFAULT '512m'",
+    "cpu_limit": "FLOAT DEFAULT 1.0",
 }
 
 TASK_GRADING_COLUMNS = {
@@ -150,6 +153,12 @@ def migrate_database() -> None:
         connection.exec_driver_sql("UPDATE machines SET privileged = 0 WHERE privileged IS NULL")
         connection.exec_driver_sql("UPDATE machines SET tty = 1 WHERE tty IS NULL")
         connection.exec_driver_sql("UPDATE machines SET stdin_open = 0 WHERE stdin_open IS NULL")
+        for table in ("lab_sessions", "scenario_sessions"):
+            session_columns = {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table})").all()}
+            if "expires_at" not in session_columns:
+                connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN expires_at DATETIME")
+            if "cleanup_status" not in session_columns:
+                connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN cleanup_status VARCHAR(32) DEFAULT 'active'")
         connection.exec_driver_sql("""
             INSERT OR IGNORE INTO lab_students (lab_id, student_id)
             SELECT lab_id, student_id FROM lab_assignments
@@ -240,7 +249,31 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "auth_mode": AUTH_MODE}
+    return {"status": "ok", "auth_mode": AUTH_MODE, "capacity": host_capacity()}
+
+
+@app.post("/admin/runtime/cleanup-expired")
+async def cleanup_expired_runtime(db: Session = Depends(get_db), user: User = Depends(require_roles(Role.admin))):
+    now = datetime.now(timezone.utc)
+    expired_labs = db.query(LabSession).filter(LabSession.status == SessionStatus.running, LabSession.expires_at.is_not(None), LabSession.expires_at <= now).all()
+    expired_scenarios = db.query(ScenarioSession).filter(ScenarioSession.status == SessionStatus.running, ScenarioSession.expires_at.is_not(None), ScenarioSession.expires_at <= now).all()
+    cleaned: list[str] = []
+    failed: list[str] = []
+    for session in [*expired_labs, *expired_scenarios]:
+        runtime = session.lab if isinstance(session, LabSession) else session.scenario
+        try:
+            command = compose_command(runtime, "stop", instance_id(runtime, session.student_id), session.student_id, session.id)
+            await run_process(command, expose_output=False)
+            session.status = SessionStatus.stopped
+            session.stopped_at = now
+            session.cleanup_status = "expired-cleaned"
+            cleaned.append(session.id)
+        except Exception:
+            logger.exception("Expired runtime cleanup failed for session %s", session.id)
+            session.cleanup_status = "cleanup-failed"
+            failed.append(session.id)
+    db.commit()
+    return {"cleaned": cleaned, "failed": failed, "checked_at": now.isoformat()}
 
 
 @app.post("/auth/login")
@@ -467,6 +500,7 @@ def stop_scenario_session(db: Session, session: ScenarioSession) -> ScenarioSess
 
 @app.post("/student/scenarios/{scenario_id}/start", status_code=status.HTTP_201_CREATED)
 async def start_personal_scenario(scenario_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.student))):
+    require_host_capacity()
     scenario = require_owned_scenario(db, scenario_id, user)
     project_id = instance_id(scenario, user.id)
     existing = next((session for session in scenario.sessions if session.status == SessionStatus.running), None)
@@ -478,7 +512,7 @@ async def start_personal_scenario(scenario_id: str, db: Session = Depends(get_db
         except Exception:
             stop_scenario_session(db, existing)
 
-    session = ScenarioSession(id=str(uuid.uuid4()), scenario_id=scenario.id, student_id=user.id)
+    session = ScenarioSession(id=str(uuid.uuid4()), scenario_id=scenario.id, student_id=user.id, expires_at=datetime.now(timezone.utc) + timedelta(minutes=MAYAJAL_SESSION_MAX_MINUTES))
     try:
         await cleanup_lab_project(scenario, project_id, user.id, session.id)
         command = compose_command(scenario, "start", project_id, user.id, session.id)
@@ -528,6 +562,7 @@ async def stop_personal_scenario(scenario_id: str, background_tasks: BackgroundT
 
 @app.post("/labs/{lab_id}/start", status_code=status.HTTP_201_CREATED)
 async def start_lab(lab_id: str, stream: bool = Query(False), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    require_host_capacity()
     lab = db.get(Lab, lab_id)
     if lab is None or lab.status != LabStatus.published:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published lab not found.")

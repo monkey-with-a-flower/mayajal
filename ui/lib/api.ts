@@ -39,6 +39,8 @@ export type ApiMachine = {
   source_digest: string | null;
   import_version: number;
   last_imported_at: string | null;
+  memory_limit: string;
+  cpu_limit: number;
 };
 
 export type ApiLab = {

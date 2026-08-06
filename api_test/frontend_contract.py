@@ -91,6 +91,8 @@ class MachineRequest(BaseModel):
     cap_add: list[str] = Field(default_factory=list, max_length=24)
     network_aliases: list[str] = Field(default_factory=list, max_length=12)
     detection_profile: str | None = Field(default=None, max_length=100)
+    memory_limit: str = Field(default="512m", pattern=r"^[1-9]\d*(m|g)$")
+    cpu_limit: float = Field(default=1.0, ge=0.1, le=16)
 
 
 class GitHubMachineImportRequest(BaseModel):
@@ -148,6 +150,8 @@ def machine_payload(machine: Machine) -> dict:
         "cap_add": machine.cap_add or [],
         "network_aliases": machine.network_aliases or [],
         "detection_profile": machine.detection_profile,
+        "memory_limit": machine.memory_limit,
+        "cpu_limit": machine.cpu_limit,
         "added_by": "Platform" if machine.created_by_id else "System",
         "source_digest": latest_version.source_digest if latest_version else None,
         "import_version": len(machine.import_versions),
@@ -649,7 +653,7 @@ def import_github_machine(payload: GitHubMachineImportRequest, db: Session = Dep
     allowed_runtime = {
         "hostname", "command", "entrypoint", "working_dir", "run_as", "restart_policy",
         "privileged", "tty", "stdin_open", "ports", "volumes", "environment", "labels",
-        "dns", "extra_hosts", "cap_add", "network_aliases", "detection_profile",
+        "dns", "extra_hosts", "cap_add", "network_aliases", "detection_profile", "memory_limit", "cpu_limit",
     }
     runtime = {key: manifest[key] for key in allowed_runtime if key in manifest}
     attachments = manifest["attachments"]
@@ -739,7 +743,7 @@ def refresh_github_machine(machine_id: str, db: Session = Depends(get_db), user:
         allowed_runtime = {
             "hostname", "command", "entrypoint", "working_dir", "run_as", "restart_policy",
             "privileged", "tty", "stdin_open", "ports", "volumes", "environment", "labels",
-            "dns", "extra_hosts", "cap_add", "network_aliases", "detection_profile",
+            "dns", "extra_hosts", "cap_add", "network_aliases", "detection_profile", "memory_limit", "cpu_limit",
         }
         machine.name = str(manifest["name"])
         machine.image_url = str(manifest["image"])

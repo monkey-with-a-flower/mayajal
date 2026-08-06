@@ -48,6 +48,8 @@ class MachineCreate(BaseModel):
     cap_add: list[str] = Field(default_factory=list, max_length=24)
     network_aliases: list[str] = Field(default_factory=list, max_length=12)
     detection_profile: str | None = Field(default=None, max_length=100)
+    memory_limit: str = Field(default="512m", pattern=r"^[1-9]\d*(m|g)$")
+    cpu_limit: float = Field(default=1.0, ge=0.1, le=16)
 
 
 class MachineRead(BaseModel):
@@ -82,6 +84,8 @@ class MachineRead(BaseModel):
     cap_add: list[str] | None
     network_aliases: list[str] | None
     detection_profile: str | None
+    memory_limit: str
+    cpu_limit: float
     approved: bool
 
     model_config = {"from_attributes": True}
@@ -120,5 +124,7 @@ class LabSessionRead(BaseModel):
     access_url: str | None
     started_at: datetime
     stopped_at: datetime | None
+    expires_at: datetime | None
+    cleanup_status: str
 
     model_config = {"from_attributes": True}
