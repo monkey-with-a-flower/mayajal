@@ -13,7 +13,8 @@ from pathlib import Path
 from fastapi import HTTPException, status
 from jinja2 import Template
 
-from api_test.config import ASSETS_DIR, LAB_RUNTIME_DIR, MAYAJAL_MASTER_URL, MAYAJAL_TELEMETRY_HOST, MAYAJAL_TELEMETRY_PORT
+from api_test.config import ASSETS_DIR, LAB_RUNTIME_DIR, MAYAJAL_DETECTION_ENGINE_MODE, MAYAJAL_MASTER_URL, MAYAJAL_TELEMETRY_HOST, MAYAJAL_TELEMETRY_PORT
+from api_test.detection_packs import build_detection_bundle, install_bundle
 from api_test.models import Lab, Machine
 
 
@@ -253,17 +254,20 @@ def prepare_lab_runtime(lab: Lab, project_id: str, peer_id: str, session_id: str
 
     suricata_dir = lab_dir / "generated" / "suricata"
     suricata_dir.mkdir(parents=True, exist_ok=True)
-    imported_rules = _imported_suricata_rules(lab)
+    imported_rules = _imported_suricata_rules(lab) if MAYAJAL_DETECTION_ENGINE_MODE == "legacy" else []
     rules_dir = suricata_dir / "rules"
     rules_dir.mkdir(parents=True, exist_ok=True)
     (rules_dir / "suricata.rules").write_text("")
+    pack_rule_files: list[str] = []
+    if MAYAJAL_DETECTION_ENGINE_MODE in {"shadow", "packs"}:
+        pack_rule_files = install_bundle(build_detection_bundle(lab.machines), rules_dir)
     for source, filename in imported_rules:
         shutil.copyfile(source, rules_dir / filename)
     suricata_config = ASSETS_DIR / "config" / "suricata" / "suricata.yaml"
     rendered_suricata = _render_suricata_config(
         suricata_config.read_text(),
         lab_subnet,
-        [filename for _, filename in imported_rules],
+        [*pack_rule_files, *[filename for _, filename in imported_rules]],
     )
     _ensure_suricata_http_eve_logging(rendered_suricata)
     (suricata_dir / "suricata.yaml").write_text(rendered_suricata)

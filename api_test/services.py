@@ -4,7 +4,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from api_test.models import Lab, LabAssignment, LabSession, Role, SessionStatus, User
-from api_test.config import MAYAJAL_SESSION_MAX_MINUTES
+from api_test.config import MAYAJAL_DETECTION_ENGINE_MODE, MAYAJAL_SESSION_MAX_MINUTES
+from api_test.detection_packs import build_detection_bundle
 
 
 def can_manage_lab(user: User, lab: Lab) -> bool:
@@ -30,6 +31,8 @@ def start_session(db: Session, lab: Lab, student: User, session_id: str | None =
         return existing
     expiry = datetime.now(timezone.utc) + timedelta(minutes=MAYAJAL_SESSION_MAX_MINUTES)
     session = LabSession(id=session_id, lab_id=lab.id, student_id=student.id, status=SessionStatus.running, expires_at=expiry) if session_id else LabSession(lab_id=lab.id, student_id=student.id, status=SessionStatus.running, expires_at=expiry)
+    if MAYAJAL_DETECTION_ENGINE_MODE in {"shadow", "packs"}:
+        session.detection_bundle_digest = build_detection_bundle(lab.machines)["digest"]
     db.add(session)
     db.flush()
     session.access_url = f"https://labs.mayajal.local/sessions/{session.id}"

@@ -1,0 +1,17 @@
+{
+  "id": "web",
+  "version": "1.0.0",
+  "rules": {"suricata": ["network/web.rules"]},
+  "detections": {
+    "9100101": {
+      "id": "MAYA-WEB-SQLI-001",
+      "title": "SQL injection syntax in HTTP URI",
+      "tactic": "Initial Access",
+      "technique_id": "T1190",
+      "technique": "Exploit Public-Facing Application",
+      "confidence": "medium",
+      "severity": "medium",
+      "rationale": "An HTTP request contained common SQL injection syntax."
+    }
+  }
+}

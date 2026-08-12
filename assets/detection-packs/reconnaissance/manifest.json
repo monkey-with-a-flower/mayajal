@@ -1,0 +1,17 @@
+{
+  "id": "reconnaissance",
+  "version": "1.0.0",
+  "rules": {"suricata": ["network/reconnaissance.rules"]},
+  "detections": {
+    "9100001": {
+      "id": "MAYA-NET-RECON-001",
+      "title": "Rapid TCP connection probing",
+      "tactic": "Reconnaissance",
+      "technique_id": "T1595",
+      "technique": "Active Scanning",
+      "confidence": "medium",
+      "severity": "low",
+      "rationale": "One source sent many TCP connection probes in a short interval."
+    }
+  }
+}

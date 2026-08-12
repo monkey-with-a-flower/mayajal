@@ -1,0 +1,1 @@
+alert http any any -> $HOME_NET any (msg:"MAYA-WEB-SQLI-001 SQL injection syntax in HTTP URI"; flow:established,to_server; http.uri; pcre:"/(?:union(?:\\s|%20)+select|(?:'|%27)(?:\\s|%20)*(?:or|and)(?:\\s|%20)+[0-9]+(?:=|%3[dD])[0-9]+)/Ui"; classtype:web-application-attack; metadata:mitre_tactic_id TA0001, mitre_technique_id T1190; sid:9100101; rev:1;)

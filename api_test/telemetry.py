@@ -8,6 +8,8 @@ from urllib.request import Request, urlopen
 from fastapi import HTTPException, status
 
 from api_test.config import MAYAJAL_OPENSEARCH_INDEX, MAYAJAL_OPENSEARCH_URL
+from api_test import config
+from api_test.detection_packs import detection_registry as load_detection_registry
 
 
 def _opensearch_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -97,7 +99,7 @@ def apply_log_detection_rules(events: list[dict[str, Any]], rules: list[dict[str
     return enriched
 
 
-def _classify_event(event: dict[str, Any]) -> tuple[str, str, str, str]:
+def _structured_classification(event: dict[str, Any], registry: dict[str, dict[str, Any]]) -> tuple[str, str, str, str] | None:
     detection = event.get("mayajal_detection") if isinstance(event.get("mayajal_detection"), dict) else None
     if detection:
         return (
@@ -107,6 +109,19 @@ def _classify_event(event: dict[str, Any]) -> tuple[str, str, str, str]:
             str(detection["rationale"]),
         )
     alert = event.get("alert") if isinstance(event.get("alert"), dict) else {}
+    sid = alert.get("signature_id") or alert.get("sid") or event.get("signature_id") or event.get("sid")
+    metadata = registry.get(str(sid)) if sid is not None else None
+    if metadata:
+        return (
+            str(metadata["tactic"]),
+            str(metadata["technique_id"]),
+            str(metadata["technique"]),
+            str(metadata["rationale"]),
+        )
+    return None
+
+
+def _legacy_classification(event: dict[str, Any]) -> tuple[str, str, str, str]:
     text = _event_text(event)
     if any(token in text for token in ["nmap", "masscan", "nikto", "gobuster", "dirb", "scan", "sweep", "probe"]):
         return ("Reconnaissance", "T1595", "Active Scanning", "Scanning or probing activity was observed.")
@@ -121,11 +136,24 @@ def _classify_event(event: dict[str, Any]) -> tuple[str, str, str, str]:
     return ("Unmapped", "UNMAPPED", "Needs analyst review", "No confident ATT&CK mapping was inferred.")
 
 
-def build_attack_report(session_id: str, events: list[dict[str, Any]], log_rules: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _classify_event(event: dict[str, Any], registry: dict[str, dict[str, Any]] | None = None, mode: str | None = None) -> tuple[str, str, str, str]:
+    selected_mode = mode or config.MAYAJAL_DETECTION_ENGINE_MODE
+    structured = _structured_classification(event, (registry or {}) if selected_mode == "packs" else {})
+    if structured:
+        return structured
+    if selected_mode == "packs":
+        return ("Unmapped", "UNMAPPED", "Needs analyst review", "No registered detection matched this event.")
+    return _legacy_classification(event)
+
+
+def build_attack_report(session_id: str, events: list[dict[str, Any]], log_rules: list[dict[str, Any]] | None = None, detection_registry: dict[str, dict[str, Any]] | None = None, mode: str | None = None) -> dict[str, Any]:
     events = apply_log_detection_rules(events, log_rules or [])
+    selected_mode = mode or config.MAYAJAL_DETECTION_ENGINE_MODE
+    if detection_registry is None and selected_mode in {"shadow", "packs"}:
+        detection_registry = load_detection_registry()
     phases: dict[str, dict[str, Any]] = {}
     for event in events:
-        tactic, technique_id, technique, rationale = _classify_event(event)
+        tactic, technique_id, technique, rationale = _classify_event(event, detection_registry, selected_mode)
         phase = phases.setdefault(
             tactic,
             {

@@ -1,0 +1,17 @@
+{
+  "id": "credential-attacks",
+  "version": "1.0.0",
+  "rules": {"suricata": ["network/credential-attacks.rules"]},
+  "detections": {
+    "9100201": {
+      "id": "MAYA-CRED-SSH-001",
+      "title": "Repeated SSH connection attempts",
+      "tactic": "Credential Access",
+      "technique_id": "T1110",
+      "technique": "Brute Force",
+      "confidence": "low",
+      "severity": "medium",
+      "rationale": "One source repeatedly initiated SSH connections in a short interval."
+    }
+  }
+}

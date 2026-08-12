@@ -1,0 +1,1 @@
+alert tcp any any -> $HOME_NET any (msg:"MAYA-NET-RECON-001 Rapid TCP connection probing"; flags:S; flow:stateless; threshold:type both, track by_src, count 20, seconds 10; classtype:network-scan; metadata:mitre_tactic_id TA0043, mitre_technique_id T1595; sid:9100001; rev:1;)

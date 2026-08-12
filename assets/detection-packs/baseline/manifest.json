@@ -1,0 +1,6 @@
+{
+  "id": "baseline",
+  "version": "1.0.0",
+  "rules": {"suricata": []},
+  "detections": {}
+}

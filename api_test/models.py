@@ -255,6 +255,7 @@ class LabSession(Base):
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cleanup_status: Mapped[str] = mapped_column(String(32), default="active")
+    detection_bundle_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     lab: Mapped[Lab] = relationship(back_populates="sessions")
     student: Mapped[User] = relationship(back_populates="sessions")

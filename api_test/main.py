@@ -15,6 +15,7 @@ from api_test.auth import get_current_user, require_roles
 from api_test.config import ASSETS_DIR, AUTH_MODE, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS, MAYAJAL_SESSION_MAX_MINUTES
 from api_test.database import Base, SessionLocal, engine, get_db
 from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
+from api_test.detection_packs import bundle_registry
 from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.pdf_report import render_attack_report_pdf
 from api_test.runtime_safety import host_capacity, require_host_capacity
@@ -159,6 +160,8 @@ def migrate_database() -> None:
                 connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN expires_at DATETIME")
             if "cleanup_status" not in session_columns:
                 connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN cleanup_status VARCHAR(32) DEFAULT 'active'")
+            if table == "lab_sessions" and "detection_bundle_digest" not in session_columns:
+                connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN detection_bundle_digest VARCHAR(64)")
         connection.exec_driver_sql("""
             INSERT OR IGNORE INTO lab_students (lab_id, student_id)
             SELECT lab_id, student_id FROM lab_assignments
@@ -795,7 +798,8 @@ def get_session_attack_report(session_id: str, size: int = Query(500, ge=1, le=2
         for machine in session.lab.machines
         for rule in (machine.detection_rules or {}).get("logs", [])
     ]
-    return build_attack_report(session_id, events, log_rules=log_rules)
+    registry = bundle_registry(session.detection_bundle_digest) if session.detection_bundle_digest else None
+    return build_attack_report(session_id, events, log_rules=log_rules, detection_registry=registry)
 
 
 @app.get("/sessions/{session_id}/attack-report.pdf")
@@ -810,7 +814,8 @@ def download_session_attack_report(session_id: str, size: int = Query(500, ge=1,
         for machine in session.lab.machines
         for rule in (machine.detection_rules or {}).get("logs", [])
     ]
-    report = build_attack_report(session_id, events, log_rules=log_rules)
+    registry = bundle_registry(session.detection_bundle_digest) if session.detection_bundle_digest else None
+    report = build_attack_report(session_id, events, log_rules=log_rules, detection_registry=registry)
     document = render_attack_report_pdf(report, {
         "lab_name": session.lab.name,
         "student_name": session.student.name,
