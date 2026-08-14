@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-import hashlib
 import re
 import shutil
 import uuid
@@ -14,7 +13,7 @@ from api_test.config import AUTH_MODE, IMPORTED_MACHINES_DIR
 from api_test.database import get_db
 from api_test.models import Lab, LabAnswer, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, MachineImportVersion, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.services import require_lab_manager, require_student_access, start_session
-from api_test.machine_import import MachineImportError, download_github_archive, install_machine_archive
+from api_test.machine_import import MachineImportError, download_github_archive, install_machine_archive, machine_content_digest
 
 router = APIRouter()
 
@@ -678,7 +677,7 @@ def import_github_machine(payload: GitHubMachineImportRequest, db: Session = Dep
     db.add(machine)
     db.add(MachineImportVersion(
         machine_id=machine.id,
-        source_digest=hashlib.sha256(archive).hexdigest(),
+        source_digest=machine_content_digest(destination),
         repository_url=payload.repository_url,
         repository_ref=payload.ref,
         repository_path=payload.machine_path,
@@ -723,11 +722,11 @@ def refresh_github_machine(machine_id: str, db: Session = Depends(get_db), user:
     swapped = False
     try:
         archive = download_github_archive(machine.repository_url, machine.repository_ref)
-        digest = hashlib.sha256(archive).hexdigest()
+        manifest = install_machine_archive(archive, machine.repository_path, staging)
+        digest = machine_content_digest(staging)
         latest = machine.import_versions[-1] if machine.import_versions else None
         if latest and latest.source_digest == digest:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The configured repository ref has not changed since the latest import.")
-        manifest = install_machine_archive(archive, machine.repository_path, staging)
         duplicate = db.query(Machine).filter(Machine.name == str(manifest["name"]), Machine.id != machine.id).first()
         if duplicate:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The refreshed manifest name belongs to another machine.")

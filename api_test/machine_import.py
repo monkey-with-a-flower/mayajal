@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import re
 import shutil
@@ -19,6 +20,15 @@ LOG_RULE_FIELDS = {"id", "field", "pattern", "tactic", "technique_id", "techniqu
 
 class MachineImportError(ValueError):
     pass
+
+
+def machine_content_digest(directory: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(item for item in directory.rglob("*") if item.is_file()):
+        digest.update(path.relative_to(directory).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def github_repository(value: str) -> tuple[str, str]:

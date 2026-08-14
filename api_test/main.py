@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import re
+import shutil
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -12,7 +14,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from api_test.auth import get_current_user, require_roles
-from api_test.config import ASSETS_DIR, AUTH_MODE, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS, MAYAJAL_SESSION_MAX_MINUTES
+from api_test.config import ASSETS_DIR, AUTH_MODE, LAB_RUNTIME_DIR, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS, MAYAJAL_SESSION_MAX_MINUTES
 from api_test.database import Base, SessionLocal, engine, get_db
 from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
 from api_test.detection_packs import bundle_registry
@@ -231,12 +233,55 @@ def seed_database() -> None:
         db.close()
 
 
+async def cleanup_expired_sessions(db: Session) -> dict:
+    now = datetime.now(timezone.utc)
+    sessions = [
+        *db.query(LabSession).filter(LabSession.status == SessionStatus.running, LabSession.expires_at.is_not(None), LabSession.expires_at <= now).all(),
+        *db.query(ScenarioSession).filter(ScenarioSession.status == SessionStatus.running, ScenarioSession.expires_at.is_not(None), ScenarioSession.expires_at <= now).all(),
+    ]
+    cleaned, failed = [], []
+    for session in sessions:
+        runtime = session.lab if isinstance(session, LabSession) else session.scenario
+        project_id = instance_id(runtime, session.student_id)
+        try:
+            await run_process(compose_command(runtime, "stop", project_id, session.student_id, session.id), expose_output=False)
+            shutil.rmtree(LAB_RUNTIME_DIR / project_id, ignore_errors=True)
+            session.status, session.stopped_at, session.cleanup_status = SessionStatus.stopped, now, "expired-cleaned"
+            cleaned.append(session.id)
+        except Exception:
+            logger.exception("Expired runtime cleanup failed for session %s", session.id)
+            session.cleanup_status = "cleanup-failed"
+            failed.append(session.id)
+    db.commit()
+    return {"cleaned": cleaned, "failed": failed, "checked_at": now.isoformat()}
+
+
+async def runtime_cleanup_loop() -> None:
+    while True:
+        db = SessionLocal()
+        try:
+            await cleanup_expired_sessions(db)
+        except Exception:
+            logger.exception("Scheduled runtime cleanup failed")
+        finally:
+            db.close()
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     migrate_database()
     seed_database()
-    yield
+    cleanup_task = asyncio.create_task(runtime_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Mayajal Core API", version="0.1.0", lifespan=lifespan)
@@ -257,26 +302,28 @@ def health():
 
 @app.post("/admin/runtime/cleanup-expired")
 async def cleanup_expired_runtime(db: Session = Depends(get_db), user: User = Depends(require_roles(Role.admin))):
-    now = datetime.now(timezone.utc)
-    expired_labs = db.query(LabSession).filter(LabSession.status == SessionStatus.running, LabSession.expires_at.is_not(None), LabSession.expires_at <= now).all()
-    expired_scenarios = db.query(ScenarioSession).filter(ScenarioSession.status == SessionStatus.running, ScenarioSession.expires_at.is_not(None), ScenarioSession.expires_at <= now).all()
-    cleaned: list[str] = []
-    failed: list[str] = []
-    for session in [*expired_labs, *expired_scenarios]:
-        runtime = session.lab if isinstance(session, LabSession) else session.scenario
-        try:
-            command = compose_command(runtime, "stop", instance_id(runtime, session.student_id), session.student_id, session.id)
-            await run_process(command, expose_output=False)
-            session.status = SessionStatus.stopped
-            session.stopped_at = now
-            session.cleanup_status = "expired-cleaned"
-            cleaned.append(session.id)
-        except Exception:
-            logger.exception("Expired runtime cleanup failed for session %s", session.id)
-            session.cleanup_status = "cleanup-failed"
-            failed.append(session.id)
+    return await cleanup_expired_sessions(db)
+
+
+@app.post("/admin/runtime/sessions/{session_id}/force-stop")
+async def force_stop_runtime(session_id: str, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.admin))):
+    session = db.get(LabSession, session_id) or db.get(ScenarioSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Runtime session not found.")
+    runtime = session.lab if isinstance(session, LabSession) else session.scenario
+    project_id = instance_id(runtime, session.student_id)
+    try:
+        await run_process(compose_command(runtime, "stop", project_id, session.student_id, session.id), expose_output=False)
+        shutil.rmtree(LAB_RUNTIME_DIR / project_id, ignore_errors=True)
+        session.cleanup_status = "force-stopped"
+    except Exception:
+        session.cleanup_status = "cleanup-failed"
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="The runtime could not be force-stopped.")
+    session.status = SessionStatus.stopped
+    session.stopped_at = datetime.now(timezone.utc)
     db.commit()
-    return {"cleaned": cleaned, "failed": failed, "checked_at": now.isoformat()}
+    return {"id": session.id, "status": "stopped", "cleanup_status": session.cleanup_status}
 
 
 @app.post("/auth/login")

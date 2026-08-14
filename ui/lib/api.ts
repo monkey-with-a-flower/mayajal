@@ -429,6 +429,8 @@ export type MachineInput = {
   cap_add: string[];
   network_aliases: string[];
   detection_profile?: string | null;
+  memory_limit: string;
+  cpu_limit: number;
 };
 
 export function createAdminMachine(apiUrl: string, machine: MachineInput) {

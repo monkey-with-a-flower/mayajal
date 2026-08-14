@@ -353,6 +353,8 @@ type MachineDraft = {
   cap_add: string;
   network_aliases: string;
   detection_profile: string;
+  memory_limit: string;
+  cpu_limit: number;
 };
 
 const emptyMachineDraft: MachineDraft = {
@@ -380,6 +382,8 @@ const emptyMachineDraft: MachineDraft = {
   cap_add: "",
   network_aliases: "",
   detection_profile: "",
+  memory_limit: "512m",
+  cpu_limit: 1,
 };
 
 function lines(value: string) {
@@ -419,6 +423,8 @@ function machinePayload(draft: MachineDraft): MachineInput {
     cap_add: lines(draft.cap_add),
     network_aliases: lines(draft.network_aliases),
     detection_profile: draft.detection_profile.trim() || null,
+    memory_limit: draft.memory_limit,
+    cpu_limit: draft.cpu_limit,
   };
 }
 
@@ -449,6 +455,8 @@ function machineDraftFrom(machine: ApiMachine): MachineDraft {
     cap_add: machine.cap_add.join("\n"),
     network_aliases: machine.network_aliases.join("\n"),
     detection_profile: machine.detection_profile ?? "",
+    memory_limit: machine.memory_limit,
+    cpu_limit: machine.cpu_limit,
   };
 }
 
@@ -464,6 +472,10 @@ function MachineForm({ value, onChange, onSubmit, submitLabel, onCancel }: { val
       <label className="text-sm font-bold text-ink/72">Description<input value={value.description} onChange={(event) => onChange({ ...value, description: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" placeholder="Approved vulnerable service for web exploitation labs" /></label>
       <label className="text-sm font-bold text-ink/72">Detection profile<input value={value.detection_profile} onChange={(event) => onChange({ ...value, detection_profile: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" placeholder="Imported automatically for repository machines" /></label>
       <label className="text-sm font-bold text-ink/72">Attachment path<input value={value.attachment} onChange={(event) => onChange({ ...value, attachment: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" placeholder="machines/example/wordlist.txt" /></label>
+    </div>
+    <div className="grid gap-3 lg:grid-cols-3">
+      <label className="text-sm font-bold text-ink/72">Memory limit<input value={value.memory_limit} onChange={(event) => onChange({ ...value, memory_limit: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm" placeholder="512m" /></label>
+      <label className="text-sm font-bold text-ink/72">CPU limit<input type="number" min={0.1} max={16} step={0.1} value={value.cpu_limit} onChange={(event) => onChange({ ...value, cpu_limit: Number(event.target.value) })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm" /></label>
     </div>
     <div className="grid gap-3 lg:grid-cols-3">
       <label className="text-sm font-bold text-ink/72">Hostname<input value={value.hostname} onChange={(event) => onChange({ ...value, hostname: event.target.value })} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-sm outline-none focus:border-fern" /></label>
