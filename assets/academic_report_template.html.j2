@@ -11,35 +11,41 @@
       content: "{{ institution_name | default(platform_name | default('Mayajal')) }} · Academic Record · Page " counter(page) " of " counter(pages);
       font-size: 8pt;
       color: #8a8478;
-      font-family: 'Georgia', 'Times New Roman', serif;
+      font-family: Inter, Arial, sans-serif;
     }
   }
 
   :root{
-    --brand: {{ brand_color | default('#5c3d2e') }};
-    --brand-accent: {{ brand_accent | default('#b08c4f') }};
-    --ink: #26221d;
-    --muted: #7a7268;
-    --line: #e4ddce;
-    --panel: #fbf8f2;
-    --pass: #2f7d4f;
-    --fail: #b3402f;
-    --pending: #b08c22;
+    --brand: {{ brand_color | default('#123a36') }};
+    --brand-accent: {{ brand_accent | default('#2f6f5f') }};
+    --ink: #17211f;
+    --muted: #60706c;
+    --line: #dbe9e4;
+    --panel: #f7fbf9;
+    --mint: #6dd9bd;
+    --sun: #f4b64a;
+    --clay: #bf6b4d;
+    --pass: #2f6f5f;
+    --fail: #bf6b4d;
+    --pending: #9b6b12;
   }
 
   * { box-sizing: border-box; }
 
   body{
-    font-family: 'Georgia', 'Times New Roman', serif;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     color: var(--ink);
     font-size: 10.3pt;
     line-height: 1.55;
     margin: 0;
-    background: #fff;
+    padding: 32px;
+    background: #edf5f1;
   }
 
-  h1,h2,h3 { font-family: 'Georgia', 'Times New Roman', serif; margin: 0; color: var(--brand); }
-  .sans { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; }
+  body > *{ max-width: 1120px; margin-left: auto; margin-right: auto; }
+
+  h1,h2,h3 { font-family: inherit; margin: 0; color: var(--brand); }
+  .sans { font-family: inherit; }
 
   /* ---------- Letterhead ---------- */
   .letterhead{
@@ -49,6 +55,9 @@
     margin-bottom: 22px;
   }
   .letterhead img{ height: 52px; margin-bottom: 8px; }
+  .platform-icon{ display:grid; place-items:center; width:52px; height:52px; margin:0 auto 8px; border-radius:12px; background:var(--brand); color:#fff; }
+  .platform-icon svg{ width:28px; height:28px; }
+  .platform-identifier{ font-size:7pt; font-weight:800; color:var(--brand-accent); letter-spacing:.16em; text-transform:uppercase; margin-bottom:5px; }
   .letterhead .institution{
     font-size: 9pt; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted);
     margin-bottom: 3px;
@@ -167,7 +176,7 @@
   }
   .report-actions{ position:sticky; top:0; z-index:20; display:flex; justify-content:flex-end; padding:10px; margin-bottom:12px; background:#fff; border-bottom:1px solid var(--line); }
   .report-actions button{ border:0; border-radius:5px; padding:9px 14px; background:var(--brand); color:#fff; font-family:'Inter',sans-serif; font-weight:700; cursor:pointer; }
-  @media print { .report-actions{ display:none; } }
+  @media print { body{ padding:0; background:#fff; } .report-actions{ display:none; } }
 </style>
 </head>
 <body>
@@ -178,9 +187,10 @@
 
   <!-- ===================== LETTERHEAD ===================== -->
   <div class="letterhead">
-    {% if platform_logo_url %}
-      <img src="{{ platform_logo_url }}" alt="{{ platform_name | default('Platform') }} logo">
-    {% endif %}
+    <div class="platform-icon" aria-label="Mayajal shield icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg>
+    </div>
+    <div class="platform-identifier">MAYAJAL · ACADEMIC RECORD</div>
     {% if institution_name %}<div class="institution">{{ institution_name }}</div>{% endif %}
     <div class="platform-name">{{ platform_name | default('Mayajal') }}</div>
     <div class="platform-tag">{{ platform_tagline | default('Cyber-Lab Orchestration &amp; Practical Assessment Platform') }}</div>
