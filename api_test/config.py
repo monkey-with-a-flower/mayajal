@@ -22,7 +22,7 @@ MAYAJAL_TELEMETRY_HOST = os.getenv("MAYAJAL_TELEMETRY_HOST", "host.docker.intern
 MAYAJAL_TELEMETRY_PORT = os.getenv("MAYAJAL_TELEMETRY_PORT", "24224")
 MAYAJAL_OPENSEARCH_URL = os.getenv("MAYAJAL_OPENSEARCH_URL", "http://127.0.0.1:9200")
 MAYAJAL_OPENSEARCH_INDEX = os.getenv("MAYAJAL_OPENSEARCH_INDEX", "mayajal-logs-*")
-MAYAJAL_DETECTION_ENGINE_MODE = os.getenv("MAYAJAL_DETECTION_ENGINE_MODE", "legacy").lower()
+MAYAJAL_DETECTION_ENGINE_MODE = os.getenv("MAYAJAL_DETECTION_ENGINE_MODE", "shadow").lower()
 if MAYAJAL_DETECTION_ENGINE_MODE not in {"legacy", "shadow", "packs"}:
     raise RuntimeError("MAYAJAL_DETECTION_ENGINE_MODE must be legacy, shadow, or packs.")
 MAYAJAL_CORS_ORIGINS = [origin.strip() for origin in os.getenv("MAYAJAL_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if origin.strip()]

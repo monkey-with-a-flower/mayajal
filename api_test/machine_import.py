@@ -76,6 +76,58 @@ def download_github_archive(repository_url: str, ref: str) -> bytes:
     return archive
 
 
+def discover_machine_folders(archive: bytes) -> list[dict[str, str]]:
+    """Return importable machine folders without extracting the repository."""
+    extracted_size = 0
+    files: dict[PurePosixPath, tarfile.TarInfo] = {}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            if not members:
+                raise MachineImportError("Repository archive is empty.")
+            for member in members:
+                path = PurePosixPath(member.name)
+                if member.isdir():
+                    continue
+                if member.issym() or member.islnk() or not member.isfile() or ".." in path.parts:
+                    raise MachineImportError("Machine repositories may contain only regular files and directories.")
+                extracted_size += member.size
+                if extracted_size > MAX_EXTRACTED_BYTES:
+                    raise MachineImportError("Repository is too large after extraction.")
+                if len(path.parts) > 1:
+                    files[PurePosixPath(*path.parts[1:])] = member
+
+            candidates: list[dict[str, str]] = []
+            for manifest_path in sorted(path for path in files if path.name == MACHINE_MANIFEST):
+                folder = manifest_path.parent
+                if folder / "Dockerfile" not in files or folder == PurePosixPath("."):
+                    continue
+                member = files[manifest_path]
+                if member.size > 1024 * 1024:
+                    continue
+                source = bundle.extractfile(member)
+                if source is None:
+                    continue
+                try:
+                    manifest = json.loads(source.read().decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if not isinstance(manifest, dict) or not {"name", "image", "os_type", "description"}.issubset(manifest):
+                    continue
+                candidates.append({
+                    "path": folder.as_posix(),
+                    "name": str(manifest["name"]),
+                    "os_type": str(manifest["os_type"]),
+                    "description": str(manifest["description"]),
+                    "image": str(manifest["image"]),
+                })
+    except (tarfile.TarError, OSError) as exc:
+        raise MachineImportError("Repository archive is not a valid gzip-compressed tar archive.") from exc
+    if not candidates:
+        raise MachineImportError("No machine folders containing both machine.json and Dockerfile were found.")
+    return candidates
+
+
 def install_machine_archive(archive: bytes, machine_folder: str, destination: Path) -> dict:
     folder = validate_folder(machine_folder)
     destination.mkdir(parents=True, exist_ok=False)

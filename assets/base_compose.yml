@@ -10,6 +10,7 @@ services:
       mayajal.service: wireguard
     cap_add:
       - NET_ADMIN
+      - NET_RAW
       - SYS_MODULE
     environment:
       - PUID=1000
@@ -58,8 +59,11 @@ services:
       - ${LABROOT}/${LABID}/logs/suricata:/var/log/suricata
     #   - ./custom-data:/custom-data
     command: ["-i", "eth0", "-c", "/etc/suricata/suricata.yaml", "-v"]
-    networks:
-      - lab_net
+    # Capture from the WireGuard gateway namespace so Suricata sees traffic
+    # forwarded between VPN learners and every target on the lab bridge.
+    network_mode: "service:wireguard"
+    depends_on:
+      - wireguard
     logging:
       driver: fluentd
       options:

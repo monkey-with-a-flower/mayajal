@@ -123,6 +123,7 @@ export type AttackReport = {
   session_id: string;
   generated_at: string;
   event_count: number;
+  telemetry_event_count: number;
   summary: string;
   attack_chain: {
     tactic: string;
@@ -435,6 +436,34 @@ export type MachineInput = {
 
 export function createAdminMachine(apiUrl: string, machine: MachineInput) {
   return request<ApiMachine>(apiUrl, "/admin/machines", { method: "POST", body: JSON.stringify(machine) });
+}
+
+export type GitHubMachineImportInput = {
+  repository_url: string;
+  ref: string;
+  machine_path: string;
+};
+
+export type GitHubMachineFolder = {
+  path: string;
+  name: string;
+  os_type: string;
+  description: string;
+  image: string;
+};
+
+export function discoverGitHubMachines(apiUrl: string, input: Pick<GitHubMachineImportInput, "repository_url" | "ref">) {
+  return request<{ repository_url: string; ref: string; machines: GitHubMachineFolder[] }>(apiUrl, "/admin/machines/github-folders", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function importGitHubMachine(apiUrl: string, input: GitHubMachineImportInput) {
+  return request<ApiMachine>(apiUrl, "/admin/machines/import-github", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export function updateAdminMachine(apiUrl: string, machineId: string, machine: MachineInput) {

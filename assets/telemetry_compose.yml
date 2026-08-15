@@ -53,6 +53,7 @@ services:
       - "24224:24224/udp"
     volumes:
       - ./fluent-bit/central-fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./fluent-bit/normalize.lua:/fluent-bit/etc/normalize.lua:ro
     depends_on:
       opensearch:
         condition: service_healthy

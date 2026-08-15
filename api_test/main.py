@@ -834,7 +834,7 @@ def get_session_telemetry(session_id: str, size: int = Query(200, ge=1, le=1000)
 
 
 @app.get("/sessions/{session_id}/attack-report")
-def get_session_attack_report(session_id: str, size: int = Query(500, ge=1, le=2000), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def get_session_attack_report(session_id: str, size: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     session = db.get(LabSession, session_id)
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
@@ -850,7 +850,7 @@ def get_session_attack_report(session_id: str, size: int = Query(500, ge=1, le=2
 
 
 @app.get("/sessions/{session_id}/attack-report.pdf")
-def download_session_attack_report(session_id: str, size: int = Query(500, ge=1, le=2000), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def download_session_attack_report(session_id: str, size: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     session = db.get(LabSession, session_id)
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")

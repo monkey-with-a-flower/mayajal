@@ -57,9 +57,45 @@ def test_pack_mode_maps_known_sid_and_does_not_guess_from_dns():
     report = build_attack_report("session", events, mode="packs")
     phases = {phase["tactic"]: phase for phase in report["attack_chain"]}
     assert phases["Reconnaissance"]["technique_id"] == "T1595"
-    assert phases["Unmapped"]["event_count"] == 1
+    assert "Unmapped" not in phases
+    assert report["telemetry_event_count"] == 2
+    assert report["event_count"] == 1
 
 
-def test_legacy_mode_preserves_keyword_classifier():
+def test_shadow_mode_prefers_registered_sid_over_legacy_keywords():
+    report = build_attack_report(
+        "session",
+        [{"event_type": "alert", "alert": {"signature_id": 9001001, "signature": "Brute Force Attempt"}, "http": {"user_agent": "curl"}}],
+        detection_registry={"9001001": {
+            "tactic": "Credential Access",
+            "technique_id": "T1110",
+            "technique": "Brute Force",
+            "rationale": "Machine-specific authentication detection.",
+        }},
+        mode="shadow",
+    )
+    assert report["attack_chain"][0]["tactic"] == "Credential Access"
+    assert report["attack_chain"][0]["technique_id"] == "T1110"
+
+
+def test_unregistered_alert_fallback_uses_signature_not_http_metadata():
+    report = build_attack_report(
+        "session",
+        [{"event_type": "alert", "alert": {"signature_id": 9001001, "signature": "Brute Force Attempt"}, "http": {"user_agent": "curl"}}],
+        detection_registry={},
+        mode="shadow",
+    )
+    assert report["attack_chain"][0]["tactic"] == "Credential Access"
+
+
+def test_raw_protocol_telemetry_is_not_reported_as_a_detection():
     report = build_attack_report("session", [{"event_type": "dns", "dns": {"query": "example.test"}}], mode="legacy")
-    assert report["attack_chain"][0]["tactic"] == "Discovery"
+    assert report["event_count"] == 0
+    assert report["telemetry_event_count"] == 1
+    assert report["attack_chain"] == []
+
+
+def test_stdout_url_does_not_create_a_discovery_phase():
+    report = build_attack_report("session", [{"source": "stdout", "log": "Running on http://127.0.0.1:8080"}], mode="shadow")
+    assert report["event_count"] == 0
+    assert report["attack_chain"] == []

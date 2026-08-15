@@ -13,7 +13,7 @@ from api_test.config import AUTH_MODE, IMPORTED_MACHINES_DIR
 from api_test.database import get_db
 from api_test.models import Lab, LabAnswer, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, MachineImportVersion, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.services import require_lab_manager, require_student_access, start_session
-from api_test.machine_import import MachineImportError, download_github_archive, install_machine_archive, machine_content_digest
+from api_test.machine_import import MachineImportError, discover_machine_folders, download_github_archive, install_machine_archive, machine_content_digest
 
 router = APIRouter()
 
@@ -98,6 +98,11 @@ class GitHubMachineImportRequest(BaseModel):
     repository_url: str = Field(min_length=20, max_length=500)
     ref: str = Field(default="main", min_length=1, max_length=200)
     machine_path: str = Field(min_length=1, max_length=500)
+
+
+class GitHubRepositoryRequest(BaseModel):
+    repository_url: str = Field(min_length=20, max_length=500)
+    ref: str = Field(default="main", min_length=1, max_length=200)
 
 
 class RoleRequest(BaseModel):
@@ -687,6 +692,18 @@ def import_github_machine(payload: GitHubMachineImportRequest, db: Session = Dep
     db.commit()
     db.refresh(machine)
     return machine_payload(machine)
+
+
+@router.post("/admin/machines/github-folders")
+def list_github_machine_folders(payload: GitHubRepositoryRequest, user: User = Depends(require_roles(Role.admin))):
+    try:
+        archive = download_github_archive(payload.repository_url, payload.ref)
+        folders = discover_machine_folders(archive)
+    except MachineImportError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to inspect the GitHub machine repository.") from exc
+    return {"repository_url": payload.repository_url, "ref": payload.ref, "machines": folders}
 
 
 @router.get("/admin/machines/{machine_id}/versions")

@@ -401,6 +401,28 @@ def test_admin_imports_standard_machine_folder_from_github(client: TestClient, m
     assert downloaded.text == "password\nwelcome\n"
 
 
+def test_admin_discovers_machine_folders_before_import(client: TestClient, monkeypatch):
+    admin = login(client, "admin.samir", "Admin!2026")
+    monkeypatch.setattr("api_test.frontend_contract.download_github_archive", lambda repository_url, ref: github_machine_archive())
+    discovered = client.post("/admin/machines/github-folders", headers=admin, json={
+        "repository_url": "https://github.com/example/vulnerable-machines",
+        "ref": "main",
+    })
+    assert discovered.status_code == 200
+    assert discovered.json()["machines"] == [{
+        "path": "targets/demo",
+        "name": "Imported GitHub Target",
+        "os_type": "Linux",
+        "description": "Imported from the standard machine repository layout.",
+        "image": "mayajal/imported-target:test",
+    }]
+    teacher = login(client, "teacher.asha", "Teacher!2026")
+    assert client.post("/admin/machines/github-folders", headers=teacher, json={
+        "repository_url": "https://github.com/example/vulnerable-machines",
+        "ref": "main",
+    }).status_code == 403
+
+
 def test_github_import_rejects_machine_folder_without_dockerfile(client: TestClient, monkeypatch):
     admin = login(client, "admin.samir", "Admin!2026")
     monkeypatch.setattr("api_test.frontend_contract.download_github_archive", lambda repository_url, ref: github_machine_archive("Missing Dockerfile", False))

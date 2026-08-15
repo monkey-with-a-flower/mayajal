@@ -122,7 +122,10 @@ def _structured_classification(event: dict[str, Any], registry: dict[str, dict[s
 
 
 def _legacy_classification(event: dict[str, Any]) -> tuple[str, str, str, str]:
-    text = _event_text(event)
+    alert = event.get("alert") if isinstance(event.get("alert"), dict) else None
+    # For an IDS alert, classify the detector's own description. Request
+    # details (for example a curl user agent) are evidence, not detections.
+    text = " ".join(str(alert.get(key, "")) for key in ("signature", "category")).lower() if alert else _event_text(event)
     if any(token in text for token in ["nmap", "masscan", "nikto", "gobuster", "dirb", "scan", "sweep", "probe"]):
         return ("Reconnaissance", "T1595", "Active Scanning", "Scanning or probing activity was observed.")
     if any(token in text for token in ["sql injection", "sqli", "xss", "traversal", "lfi", "rfi", "exploit", "shellshock", "web attack"]):
@@ -138,7 +141,7 @@ def _legacy_classification(event: dict[str, Any]) -> tuple[str, str, str, str]:
 
 def _classify_event(event: dict[str, Any], registry: dict[str, dict[str, Any]] | None = None, mode: str | None = None) -> tuple[str, str, str, str]:
     selected_mode = mode or config.MAYAJAL_DETECTION_ENGINE_MODE
-    structured = _structured_classification(event, (registry or {}) if selected_mode == "packs" else {})
+    structured = _structured_classification(event, (registry or {}) if selected_mode in {"shadow", "packs"} else {})
     if structured:
         return structured
     if selected_mode == "packs":
@@ -148,11 +151,20 @@ def _classify_event(event: dict[str, Any], registry: dict[str, dict[str, Any]] |
 
 def build_attack_report(session_id: str, events: list[dict[str, Any]], log_rules: list[dict[str, Any]] | None = None, detection_registry: dict[str, dict[str, Any]] | None = None, mode: str | None = None) -> dict[str, Any]:
     events = apply_log_detection_rules(events, log_rules or [])
+    telemetry_event_count = len(events)
+    # Reports describe detections, not every packet, flow, protocol record, or
+    # application log line. Raw telemetry remains available for investigation.
+    detections = [
+        event for event in events
+        if isinstance(event.get("mayajal_detection"), dict)
+        or event.get("event_type") == "alert"
+        or isinstance(event.get("alert"), dict)
+    ]
     selected_mode = mode or config.MAYAJAL_DETECTION_ENGINE_MODE
     if detection_registry is None and selected_mode in {"shadow", "packs"}:
         detection_registry = load_detection_registry()
     phases: dict[str, dict[str, Any]] = {}
-    for event in events:
+    for event in detections:
         tactic, technique_id, technique, rationale = _classify_event(event, detection_registry, selected_mode)
         phase = phases.setdefault(
             tactic,
@@ -185,7 +197,14 @@ def build_attack_report(session_id: str, events: list[dict[str, Any]], log_rules
     return {
         "session_id": session_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "event_count": len(events),
-        "summary": "No telemetry events were found for this session." if not events else f"Reconstructed {len(ordered_phases)} ATT&CK phases from {len(events)} telemetry events.",
+        "event_count": len(detections),
+        "telemetry_event_count": telemetry_event_count,
+        "summary": (
+            "No telemetry events were found for this session."
+            if not events else
+            "No explicit detections were found in the available telemetry."
+            if not detections else
+            f"Reconstructed {len(ordered_phases)} ATT&CK phases from {len(detections)} detections across {telemetry_event_count} telemetry events."
+        ),
         "attack_chain": ordered_phases,
     }
