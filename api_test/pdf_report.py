@@ -36,10 +36,11 @@ def _evidence_summary(evidence: dict[str, Any]) -> str:
     return " | ".join(part for part in parts if part)
 
 
-def _report_lines(report: dict[str, Any], metadata: dict[str, Any]) -> list[tuple[str, str]]:
+def _report_lines(report: dict[str, Any], metadata: dict[str, Any], report_type: str) -> list[tuple[str, str]]:
+    academic = report_type == "academic"
     lines: list[tuple[str, str]] = [
-        ("title", "MAYAJAL ATTACK-CHAIN REPORT"),
-        ("subtitle", "Authorized cyber-lab telemetry reconstruction"),
+        ("title", "MAYAJAL ACADEMIC LAB REPORT" if academic else "MAYAJAL PROFESSIONAL SECURITY REPORT"),
+        ("subtitle", "Evidence-based learning and ATT&CK analysis" if academic else "Authorized cyber-lab detection assessment"),
         ("space", ""),
         ("heading", "REPORT OVERVIEW"),
         ("body", f"Lab: {metadata.get('lab_name', 'Unknown lab')}"),
@@ -51,8 +52,9 @@ def _report_lines(report: dict[str, Any], metadata: dict[str, Any]) -> list[tupl
         ("body", f"Telemetry events analyzed: {report.get('telemetry_event_count', report.get('event_count', 0))}"),
         ("body", f"Explicit detections reported: {report.get('event_count', 0)}"),
         ("space", ""),
-        ("heading", "EXECUTIVE SUMMARY"),
+        ("heading", "ACADEMIC SUMMARY" if academic else "EXECUTIVE SUMMARY"),
         ("body", str(report.get("summary") or "No summary is available.")),
+        ("body", "This report distinguishes raw telemetry from explicit rule-based detections and maps observed evidence to MITRE ATT&CK." if academic else "This report summarizes validated security detections for operational review."),
         ("space", ""),
         ("heading", "ATT&CK CHAIN"),
     ]
@@ -73,13 +75,13 @@ def _report_lines(report: dict[str, Any], metadata: dict[str, Any]) -> list[tupl
             lines.append(("evidence", "- No evidence sample was retained for this phase."))
         lines.append(("space", ""))
     lines.extend([
-        ("heading", "ANALYST NOTES"),
-        ("body", "This report is an automated reconstruction from lab telemetry. ATT&CK mappings indicate observed behavior and should be reviewed alongside the original events before drawing operational conclusions."),
+        ("heading", "ACADEMIC INTERPRETATION" if academic else "ANALYST NOTES"),
+        ("body", "Use the retained evidence to explain how each observed behavior supports its ATT&CK mapping. Phases without a fired detection are intentionally omitted." if academic else "This automated reconstruction includes only explicit detections. Validate retained evidence against original telemetry before operational conclusions."),
     ])
     return lines
 
 
-def render_attack_report_pdf(report: dict[str, Any], metadata: dict[str, Any]) -> bytes:
+def render_attack_report_pdf(report: dict[str, Any], metadata: dict[str, Any], report_type: str = "professional") -> bytes:
     styles = {
         "title": (18, 24, "F2", 46),
         "subtitle": (10, 20, "F1", 70),
@@ -98,7 +100,7 @@ def render_attack_report_pdf(report: dict[str, Any], metadata: dict[str, Any]) -
         pages.append([])
         y = PAGE_HEIGHT - MARGIN
 
-    for style, value in _report_lines(report, metadata):
+    for style, value in _report_lines(report, metadata, report_type):
         size, leading, font, width = styles[style]
         wrapped = [""] if style == "space" else textwrap.wrap(str(value), width=width, break_long_words=True, break_on_hyphens=False) or [""]
         required = leading * len(wrapped)

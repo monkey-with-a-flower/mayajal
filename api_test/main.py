@@ -6,6 +6,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
@@ -731,13 +732,6 @@ def list_lab_attachments(lab_id: str, db: Session = Depends(get_db), user: User 
     if lab is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found.")
     require_lab_operator(db, user, lab)
-    session_user = session_owner_for(user, lab)
-    running_session = next(
-        (item for item in lab.sessions if item.student_id == session_user.id and item.status == SessionStatus.running),
-        None,
-    )
-    if running_session is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Start the lab before viewing machine attachments.")
     return {"lab_id": lab.id, "attachments": lab_attachment_downloads(lab)}
 
 
@@ -754,13 +748,6 @@ def _download_machine_attachment(lab_id: str, machine_id: str, attachment: str |
     machine = next((item for item in lab.machines if item.id == machine_id), None)
     if machine is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found in this lab.")
-    session_user = session_owner_for(user, lab)
-    running_session = next(
-        (item for item in lab.sessions if item.student_id == session_user.id and item.status == SessionStatus.running),
-        None,
-    )
-    if running_session is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Start the lab before downloading machine attachments.")
     attachment_path = machine_attachment_path(machine, attachment)
     return FileResponse(attachment_path, filename=attachment_path.name, media_type="text/plain")
 
@@ -850,7 +837,13 @@ def get_session_attack_report(session_id: str, size: int = Query(10000, ge=1, le
 
 
 @app.get("/sessions/{session_id}/attack-report.pdf")
-def download_session_attack_report(session_id: str, size: int = Query(10000, ge=1, le=10000), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def download_session_attack_report(
+    session_id: str,
+    size: int = Query(10000, ge=1, le=10000),
+    report_type: Literal["academic", "professional"] = Query("professional"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     session = db.get(LabSession, session_id)
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
@@ -868,9 +861,9 @@ def download_session_attack_report(session_id: str, size: int = Query(10000, ge=
         "student_name": session.student.name,
         "started_at": session.started_at.isoformat(),
         "stopped_at": session.stopped_at.isoformat() if session.stopped_at else None,
-    })
+    }, report_type=report_type)
     safe_lab_name = re.sub(r"[^a-zA-Z0-9_-]+", "-", session.lab.name).strip("-").lower() or "lab"
-    filename = f"mayajal-{safe_lab_name}-{session.id[:8]}-attack-report.pdf"
+    filename = f"mayajal-{safe_lab_name}-{session.id[:8]}-{report_type}-report.pdf"
     return Response(
         content=document,
         media_type="application/pdf",

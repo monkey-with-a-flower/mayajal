@@ -30,6 +30,10 @@ def test_resolver_selects_profiles_without_machine_manifest_changes():
     assert selected["web"] == "A selected machine exposes a web service"
 
 
+def test_reconnaissance_pack_is_baseline_coverage_for_single_machine():
+    assert "reconnaissance" in {pack.id for pack in resolve_detection_packs([machine()])}
+
+
 def test_bundle_is_content_addressed_and_reproducible(tmp_path: Path):
     first = build_detection_bundle([machine()], bundle_root=tmp_path)
     second = build_detection_bundle([machine()], bundle_root=tmp_path)

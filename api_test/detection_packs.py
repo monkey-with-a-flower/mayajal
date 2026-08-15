@@ -52,10 +52,11 @@ def load_pack_catalogue(root: Path = DETECTION_PACKS_DIR) -> dict[str, tuple[Pat
 def resolve_detection_packs(machines: Iterable[object], root: Path = DETECTION_PACKS_DIR) -> list[ResolvedPack]:
     catalogue = load_pack_catalogue(root)
     machine_texts = [_machine_text(machine) for machine in machines]
-    selected: dict[str, str] = {"baseline": "Required by platform policy"}
+    selected: dict[str, str] = {
+        "baseline": "Required by platform policy",
+        "reconnaissance": "Common network reconnaissance coverage required by platform policy",
+    }
     combined = " ".join(machine_texts)
-    if len(machine_texts) > 1 or re.search(r"kali|attacker|pentest", combined):
-        selected["reconnaissance"] = "The lab contains multiple machines or an attacker workstation"
     if re.search(r"http|https|web|dvwa|nginx|apache|wordpress|8080|:80\b", combined):
         selected["web"] = "A selected machine exposes a web service"
     if re.search(r"login|authentication|credential|ssh|rdp|active directory|domain controller", combined):
