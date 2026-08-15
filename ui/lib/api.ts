@@ -65,14 +65,7 @@ export type ApiLab = {
   submission_status: "awaiting_review" | "finalized" | null;
   score: number | null;
   max_score: number;
-  lab_ip?: string | null;
-  machine_ips?: LabMachineIp[];
-};
-
-export type LabMachineIp = {
-  machine_id: string;
-  machine_name: string;
-  ip_address: string;
+  lab_cidr?: string | null;
 };
 
 export type ApiSubmission = {
@@ -229,8 +222,7 @@ export function startLab(apiUrl: string, labId: string) {
       wireguard_config: string;
       wireguard_filename: string;
       attachments: LabAttachment[];
-      lab_ip: string | null;
-      machine_ips: LabMachineIp[];
+      lab_cidr: string | null;
       output?: string;
     }
   >(
@@ -384,8 +376,7 @@ export function getLabVpn(apiUrl: string, labId: string) {
       lab_id: string;
       wireguard_config: string;
       wireguard_filename: string;
-      lab_ip: string | null;
-      machine_ips: LabMachineIp[];
+      lab_cidr: string | null;
     }
   >(
     apiUrl,

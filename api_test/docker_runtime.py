@@ -165,8 +165,8 @@ def _wireguard_lab_ip(lab_subnet: str) -> str:
     return str(network.broadcast_address - 1)
 
 
-def lab_machine_addresses(lab: Lab, project_id: str) -> list[dict[str, str]]:
-    """Return live target addresses from the isolated Docker lab network."""
+def lab_network_cidr(project_id: str) -> str | None:
+    """Return the live isolated Docker lab network in CIDR notation."""
     try:
         result = subprocess.run(
             ["docker", "network", "inspect", project_id],
@@ -178,17 +178,12 @@ def lab_machine_addresses(lab: Lab, project_id: str) -> list[dict[str, str]]:
         )
         network = json.loads(result.stdout)[0] if result.returncode == 0 else {}
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, IndexError):
-        return []
-    by_name = {
-        str(container.get("Name", "")): str(container.get("IPv4Address", "")).split("/", 1)[0]
-        for container in (network.get("Containers", {}) or {}).values()
-    }
-    addresses = []
-    for machine in lab.machines:
-        ip_address = by_name.get(f"{project_id}_{_service_name(machine)}")
-        if ip_address:
-            addresses.append({"machine_id": machine.id, "machine_name": machine.name, "ip_address": ip_address})
-    return addresses
+        return None
+    for item in network.get("IPAM", {}).get("Config", []) or []:
+        subnet = item.get("Subnet")
+        if subnet:
+            return str(subnet)
+    return None
 
 
 def _vpn_port(project_id: str) -> str:
