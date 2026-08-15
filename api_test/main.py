@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from api_test.auth import get_current_user, require_roles
 from api_test.config import ASSETS_DIR, AUTH_MODE, LAB_RUNTIME_DIR, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS, MAYAJAL_SESSION_MAX_MINUTES
 from api_test.database import Base, SessionLocal, engine, get_db
-from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
+from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, lab_machine_addresses, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
 from api_test.detection_packs import bundle_registry
 from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.html_report import render_report_html
@@ -692,6 +692,8 @@ async def start_lab(lab_id: str, stream: bool = Query(False), db: Session = Depe
         "message": lab.name + " VPN config is ready.",
         "attachments": lab_attachment_downloads(lab),
     }
+    response["machine_ips"] = lab_machine_addresses(lab, project_id)
+    response["lab_ip"] = response["machine_ips"][0]["ip_address"] if response["machine_ips"] else None
     if user.role == Role.admin:
         response["output"] = output + ("\n" + verification_output if existing_session is None else "")
     return response
@@ -714,10 +716,13 @@ async def get_lab_vpn(lab_id: str, db: Session = Depends(get_db), user: User = D
     except Exception as exc:
         stop_session(db, session)
         raise lab_operation_failed(exc, user) from exc
+    machine_ips = lab_machine_addresses(lab, project_id)
     return {
         "lab_id": lab.id,
         "wireguard_config": config,
         "wireguard_filename": vpn_filename(lab, session_user),
+        "machine_ips": machine_ips,
+        "lab_ip": machine_ips[0]["ip_address"] if machine_ips else None,
     }
 
 

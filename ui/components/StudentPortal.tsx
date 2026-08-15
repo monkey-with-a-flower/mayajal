@@ -460,6 +460,21 @@ function LabWorkspace({
                       ? "Download the WireGuard configuration and connect to the isolated lab network."
                       : "The environment is offline; reports and attachments remain available."}
                   </p>
+                  {lab.status === "running" && lab.machine_ips?.length
+                    ? (
+                      <div className="mt-4 space-y-2 border-t border-fern/15 pt-3">
+                        <p className="text-[11px] font-black uppercase tracking-wide text-fern">
+                          Lab IP{lab.machine_ips.length > 1 ? " addresses" : ""}
+                        </p>
+                        {lab.machine_ips.map((machine) => (
+                          <div key={machine.machine_id} className="flex items-center justify-between gap-3 text-xs">
+                            <span className="truncate font-semibold text-ink/60">{machine.machine_name}</span>
+                            <code className="rounded bg-white px-2 py-1 font-bold text-canopy">{machine.ip_address}</code>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                    : null}
                 </div>
                 {lab.status === "running"
                   ? (
@@ -893,13 +908,16 @@ export default function StudentPortal(
     labId: string,
     status: ApiLab["status"],
     nextStep: string,
+    machineIps: ApiLab["machine_ips"] = [],
   ) {
     setData((current) =>
       current
         ? {
           ...current,
           assignments: current.assignments.map((lab) =>
-            lab.id === labId ? { ...lab, status, next_step: nextStep } : lab
+            lab.id === labId
+              ? { ...lab, status, next_step: nextStep, machine_ips: machineIps, lab_ip: machineIps[0]?.ip_address ?? null }
+              : lab
           ),
         }
         : current
@@ -951,6 +969,7 @@ export default function StudentPortal(
         lab.id,
         "running",
         "Download the VPN config and connect with WireGuard",
+        result.machine_ips,
       );
       setNotice(result.message);
     } catch (reason) {
@@ -971,6 +990,7 @@ export default function StudentPortal(
         lab.id,
         "running",
         "Download the VPN config and connect with WireGuard",
+        result.machine_ips,
       );
       setNotice("Downloaded " + result.wireguard_filename + ".");
     } catch (reason) {

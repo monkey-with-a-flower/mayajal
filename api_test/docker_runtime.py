@@ -165,6 +165,32 @@ def _wireguard_lab_ip(lab_subnet: str) -> str:
     return str(network.broadcast_address - 1)
 
 
+def lab_machine_addresses(lab: Lab, project_id: str) -> list[dict[str, str]]:
+    """Return live target addresses from the isolated Docker lab network."""
+    try:
+        result = subprocess.run(
+            ["docker", "network", "inspect", project_id],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        network = json.loads(result.stdout)[0] if result.returncode == 0 else {}
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, IndexError):
+        return []
+    by_name = {
+        str(container.get("Name", "")): str(container.get("IPv4Address", "")).split("/", 1)[0]
+        for container in (network.get("Containers", {}) or {}).values()
+    }
+    addresses = []
+    for machine in lab.machines:
+        ip_address = by_name.get(f"{project_id}_{_service_name(machine)}")
+        if ip_address:
+            addresses.append({"machine_id": machine.id, "machine_name": machine.name, "ip_address": ip_address})
+    return addresses
+
+
 def _vpn_port(project_id: str) -> str:
     digest = hashlib.sha1(project_id.encode()).digest()
     return str(52000 + int.from_bytes(digest[:2], "big") % 10000)
