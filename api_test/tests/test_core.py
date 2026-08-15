@@ -269,17 +269,17 @@ def test_session_attack_report_uses_authorized_session_telemetry(client: TestCli
     assert report.json()["session_id"] == session_id
     assert report.json()["attack_chain"][0]["tactic"] == "Reconnaissance"
     assert report.json()["attack_chain"][0]["technique_id"] == "T1595"
-    pdf = client.get(f"/sessions/{session_id}/attack-report.pdf?report_type=professional", headers=headers)
-    assert pdf.status_code == 200
-    assert pdf.headers["content-type"] == "application/pdf"
-    assert pdf.headers["content-disposition"].endswith('.pdf"')
-    assert pdf.content.startswith(b"%PDF-1.4")
-    assert b"MAYAJAL PROFESSIONAL SECURITY REPORT" in pdf.content
-    assert b"Reconnaissance" in pdf.content
-    academic_pdf = client.get(f"/sessions/{session_id}/attack-report.pdf?report_type=academic", headers=headers)
-    assert academic_pdf.status_code == 200
-    assert b"MAYAJAL ACADEMIC LAB REPORT" in academic_pdf.content
-    assert client.get(f"/sessions/{session_id}/attack-report.pdf", headers={"Authorization": "Bearer dev:student.lena"}).status_code == 403
+    professional = client.get(f"/sessions/{session_id}/attack-report/view?report_type=professional", headers=headers)
+    assert professional.status_code == 200
+    assert professional.headers["content-type"].startswith("text/html")
+    assert b"Professional Security Report" in professional.content
+    assert b"Reconnaissance" in professional.content
+    assert b"Download / Save as PDF" in professional.content
+    academic = client.get(f"/sessions/{session_id}/attack-report/view?report_type=academic", headers=headers)
+    assert academic.status_code == 200
+    assert b"Academic Lab Performance Report" in academic.content
+    assert b"Download / Save as PDF" in academic.content
+    assert client.get(f"/sessions/{session_id}/attack-report/view", headers={"Authorization": "Bearer dev:student.lena"}).status_code == 403
     stopped = client.post(f"/labs/{lab_id}/stop", headers=headers)
     assert stopped.status_code == 200
 

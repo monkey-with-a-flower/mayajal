@@ -388,14 +388,18 @@ export function getAttackReport(apiUrl: string, sessionId: string) {
   );
 }
 
-export async function downloadAttackReport(
+export async function openAttackReport(
   apiUrl: string,
   sessionId: string,
   reportType: ReportType,
 ) {
+  const reportWindow = window.open("", "_blank");
+  if (!reportWindow) throw new Error("Allow pop-ups to open the report page.");
+  reportWindow.document.title = "Loading Mayajal report";
+  reportWindow.document.body.textContent = "Loading report…";
   const response = await fetch(
     trimUrl(apiUrl) + "/sessions/" + sessionId +
-      "/attack-report.pdf?report_type=" + reportType,
+      "/attack-report/view?report_type=" + reportType,
     {
       headers: {
         ...(accessToken ? { Authorization: "Bearer " + accessToken } : {}),
@@ -403,15 +407,14 @@ export async function downloadAttackReport(
     },
   );
   if (!response.ok) {
+    reportWindow.close();
     const body = await response.json().catch(() => null);
-    throw new Error(
-      body?.detail ?? "Unable to generate the attack-chain PDF report.",
-    );
+    throw new Error(body?.detail ?? "Unable to generate the report page.");
   }
-  const disposition = response.headers.get("Content-Disposition") ?? "";
-  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ??
-    "mayajal-attack-report.pdf";
-  return { filename, blob: await response.blob() };
+  const reportUrl = URL.createObjectURL(
+    new Blob([await response.text()], { type: "text/html" }),
+  );
+  reportWindow.location.href = reportUrl;
 }
 
 export function saveScenario(

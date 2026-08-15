@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ report_title | default('Lab Performance Report') }} — {{ student_name | default('') }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 24mm 18mm 22mm 18mm;
+    @bottom-center {
+      content: "{{ institution_name | default(platform_name | default('Mayajal')) }} · Academic Record · Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      color: #8a8478;
+      font-family: 'Georgia', 'Times New Roman', serif;
+    }
+  }
+
+  :root{
+    --brand: {{ brand_color | default('#5c3d2e') }};
+    --brand-accent: {{ brand_accent | default('#b08c4f') }};
+    --ink: #26221d;
+    --muted: #7a7268;
+    --line: #e4ddce;
+    --panel: #fbf8f2;
+    --pass: #2f7d4f;
+    --fail: #b3402f;
+    --pending: #b08c22;
+  }
+
+  * { box-sizing: border-box; }
+
+  body{
+    font-family: 'Georgia', 'Times New Roman', serif;
+    color: var(--ink);
+    font-size: 10.3pt;
+    line-height: 1.55;
+    margin: 0;
+    background: #fff;
+  }
+
+  h1,h2,h3 { font-family: 'Georgia', 'Times New Roman', serif; margin: 0; color: var(--brand); }
+  .sans { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; }
+
+  /* ---------- Letterhead ---------- */
+  .letterhead{
+    text-align: center;
+    padding-bottom: 14px;
+    border-bottom: 2.5px solid var(--brand);
+    margin-bottom: 22px;
+  }
+  .letterhead img{ height: 52px; margin-bottom: 8px; }
+  .letterhead .institution{
+    font-size: 9pt; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted);
+    margin-bottom: 3px;
+  }
+  .letterhead .platform-name{
+    font-size: 16pt; font-weight: 700; color: var(--brand); letter-spacing: 0.02em;
+  }
+  .letterhead .platform-tag{
+    font-size: 9pt; font-style: italic; color: var(--muted); margin-top: 2px;
+  }
+
+  /* ---------- Title ---------- */
+  .doc-title{ text-align:center; margin-bottom: 22px; }
+  .doc-title h1{ font-size: 18pt; font-weight: 700; }
+  .doc-title .doc-subtitle{ font-size: 10pt; color: var(--muted); font-style: italic; margin-top: 4px; }
+
+  /* ---------- Student / lab info block ---------- */
+  .info-panel{
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px 20px;
+    margin-bottom: 22px;
+  }
+  .info-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; }
+  .info-row{ display:flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted var(--line); font-size: 9.6pt; }
+  .info-row .k{ color: var(--muted); }
+  .info-row .v{ font-weight: 600; text-align: right; }
+
+  /* ---------- Section ---------- */
+  .section{ margin-bottom: 22px; page-break-inside: avoid; }
+  .section-title{
+    font-size: 12pt; font-weight: 700; color: var(--brand);
+    border-bottom: 1px solid var(--brand-accent);
+    padding-bottom: 5px; margin-bottom: 12px;
+    letter-spacing: 0.01em;
+  }
+
+  /* ---------- Grade summary ---------- */
+  .grade-summary{
+    display:flex; align-items:stretch; gap: 16px; margin-bottom: 22px;
+    border: 1.5px solid var(--brand); border-radius: 6px; overflow:hidden;
+  }
+  .grade-summary .grade-box{
+    background: var(--brand); color: #fff; text-align:center;
+    padding: 18px 24px; display:flex; flex-direction:column; justify-content:center;
+    min-width: 120px;
+  }
+  .grade-summary .grade-box .letter{ font-size: 30pt; font-weight: 800; line-height:1; font-family:'Inter',sans-serif; }
+  .grade-summary .grade-box .of{ font-size: 8pt; text-transform:uppercase; letter-spacing:.08em; margin-top:4px; opacity:.85; }
+  .grade-summary .grade-meta{ flex:1; padding: 14px 18px; }
+  .grade-meta .score-line{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+  .grade-meta .score-line .big{ font-size: 17pt; font-weight:700; font-family:'Inter',sans-serif; color: var(--brand); }
+  .progress-track{ background:#eee6d8; border-radius:6px; height: 9px; overflow:hidden; }
+  .progress-fill{ background: var(--brand-accent); height:100%; }
+  .status-pill{
+    display:inline-block; font-size: 8pt; font-family:'Inter',sans-serif; font-weight:700;
+    padding: 3px 10px; border-radius: 20px; text-transform:uppercase; letter-spacing:.05em;
+    margin-top: 8px;
+  }
+  .status-pill.finalized{ background:#e4f3ea; color: var(--pass); }
+  .status-pill.awaiting{ background:#faf1de; color: var(--pending); }
+
+  /* ---------- Task table ---------- */
+  table.tasks{ width:100%; border-collapse: collapse; font-size: 9.3pt; }
+  table.tasks th{
+    text-align:left; background: var(--brand); color:#fff; font-family:'Inter',sans-serif;
+    font-size: 7.8pt; text-transform: uppercase; letter-spacing:.05em;
+    padding: 7px 9px;
+  }
+  table.tasks th.center, table.tasks td.center{ text-align:center; }
+  table.tasks td{ padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.tasks tr:nth-child(even){ background: var(--panel); }
+  table.tasks .task-status{
+    font-family:'Inter',sans-serif; font-size: 7.6pt; font-weight:700; text-transform:uppercase;
+    padding: 2px 7px; border-radius: 10px; white-space:nowrap;
+  }
+  table.tasks .task-status.correct{ background:#e4f3ea; color: var(--pass); }
+  table.tasks .task-status.incorrect{ background:#fbe9e6; color: var(--fail); }
+  table.tasks .task-status.review{ background:#faf1de; color: var(--pending); }
+  table.tasks .grading-type{ color: var(--muted); font-size: 8.4pt; font-style: italic; }
+
+  /* ---------- Feedback ---------- */
+  .feedback-box{
+    border-left: 4px solid var(--brand-accent);
+    background: var(--panel);
+    padding: 13px 16px;
+    font-size: 9.8pt;
+    font-style: italic;
+    color: #3a352c;
+  }
+  .feedback-attr{ text-align:right; font-style: normal; font-size: 8.6pt; color: var(--muted); margin-top: 8px; }
+
+  /* ---------- Objectives ---------- */
+  .objectives ul{ margin: 0; padding-left: 20px; font-size: 9.6pt; }
+  .objectives li{ margin-bottom: 5px; }
+
+  /* ---------- Session summary strip ---------- */
+  .session-strip{
+    display:flex; gap: 0; border: 1px solid var(--line); border-radius: 4px; overflow:hidden; margin-bottom: 4px;
+  }
+  .session-strip .cell{ flex:1; padding: 9px 12px; border-right: 1px solid var(--line); }
+  .session-strip .cell:last-child{ border-right:none; }
+  .session-strip .cell .lbl{ font-family:'Inter',sans-serif; font-size:7.2pt; text-transform:uppercase; letter-spacing:.06em; color: var(--muted); }
+  .session-strip .cell .val{ font-size: 9.6pt; font-weight:700; margin-top:2px; }
+
+  /* ---------- Signatures ---------- */
+  .signatures{ display:flex; justify-content: space-between; margin-top: 40px; }
+  .sig-block{ width: 44%; }
+  .sig-line{ border-top: 1px solid var(--ink); margin-top: 34px; padding-top: 5px; font-size: 8.6pt; }
+  .sig-block .role{ color: var(--muted); font-size: 8.2pt; }
+
+  .footer-note{
+    margin-top: 26px; padding-top: 12px; border-top: 1px solid var(--line);
+    font-size: 7.8pt; color: var(--muted); text-align:center; font-family:'Inter',sans-serif;
+  }
+  .report-actions{ position:sticky; top:0; z-index:20; display:flex; justify-content:flex-end; padding:10px; margin-bottom:12px; background:#fff; border-bottom:1px solid var(--line); }
+  .report-actions button{ border:0; border-radius:5px; padding:9px 14px; background:var(--brand); color:#fff; font-family:'Inter',sans-serif; font-weight:700; cursor:pointer; }
+  @media print { .report-actions{ display:none; } }
+</style>
+</head>
+<body>
+
+  <div class="report-actions">
+    <button type="button" onclick="window.print()">Download / Save as PDF</button>
+  </div>
+
+  <!-- ===================== LETTERHEAD ===================== -->
+  <div class="letterhead">
+    {% if platform_logo_url %}
+      <img src="{{ platform_logo_url }}" alt="{{ platform_name | default('Platform') }} logo">
+    {% endif %}
+    {% if institution_name %}<div class="institution">{{ institution_name }}</div>{% endif %}
+    <div class="platform-name">{{ platform_name | default('Mayajal') }}</div>
+    <div class="platform-tag">{{ platform_tagline | default('Cyber-Lab Orchestration &amp; Practical Assessment Platform') }}</div>
+  </div>
+
+  <!-- ===================== TITLE ===================== -->
+  <div class="doc-title">
+    <h1>{{ report_title | default('Lab Performance Report') }}</h1>
+    <div class="doc-subtitle">{{ course_name | default('') }}{% if course_name and lab_name %} — {% endif %}{{ lab_name | default('') }}</div>
+  </div>
+
+  <!-- ===================== STUDENT / LAB INFO ===================== -->
+  <div class="info-panel">
+    <div class="info-grid">
+      <div class="info-row"><span class="k">Student name</span><span class="v">{{ student_name | default('—') }}</span></div>
+      <div class="info-row"><span class="k">Student ID</span><span class="v">{{ student_id | default('—') }}</span></div>
+      <div class="info-row"><span class="k">Lab</span><span class="v">{{ lab_name | default('—') }}</span></div>
+      <div class="info-row"><span class="k">Instructor</span><span class="v">{{ teacher_name | default('—') }}</span></div>
+      <div class="info-row"><span class="k">Date completed</span><span class="v">{{ date_completed | default('—') }}</span></div>
+      <div class="info-row"><span class="k">Submission status</span><span class="v">{{ submission_status | default('—') }}</span></div>
+    </div>
+  </div>
+
+  <!-- ===================== GRADE SUMMARY ===================== -->
+  <div class="grade-summary">
+    <div class="grade-box">
+      <div class="letter">{{ grade_letter | default('—') }}</div>
+      <div class="of">Overall grade</div>
+    </div>
+    <div class="grade-meta">
+      <div class="score-line">
+        <div class="sans big">{{ total_score | default(0) }} / {{ max_score | default(0) }} points</div>
+        <div class="sans" style="color:var(--muted);font-size:9pt;">{{ percentage | default(0) }}%</div>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width:{{ percentage | default(0) }}%;"></div></div>
+      <span class="status-pill {{ 'finalized' if (submission_status | default('') | lower) == 'finalized' else 'awaiting' }}">
+        {{ submission_status | default('Awaiting review') }}
+      </span>
+    </div>
+  </div>
+
+  <!-- ===================== LEARNING OBJECTIVES ===================== -->
+  {% if learning_objectives %}
+  <div class="section objectives">
+    <div class="section-title">Learning Objectives</div>
+    <ul>
+      {% for obj in learning_objectives %}
+      <li>{{ obj }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <!-- ===================== LAB DESCRIPTION ===================== -->
+  {% if lab_description %}
+  <div class="section">
+    <div class="section-title">Lab Overview</div>
+    <p style="margin:0;font-size:9.8pt;">{{ lab_description }}</p>
+  </div>
+  {% endif %}
+
+  <!-- ===================== SESSION SUMMARY ===================== -->
+  <div class="section">
+    <div class="section-title">Session Summary</div>
+    <div class="session-strip">
+      <div class="cell"><div class="lbl">Machines used</div><div class="val">{{ machine_count | default('—') }}</div></div>
+      <div class="cell"><div class="lbl">Time on task</div><div class="val">{{ duration | default('—') }}</div></div>
+      <div class="cell"><div class="lbl">Attempts</div><div class="val">{{ attempt_count | default('1') }}</div></div>
+      <div class="cell"><div class="lbl">Tasks completed</div><div class="val">{{ tasks_completed | default(tasks | default([]) | length) }} / {{ tasks | default([]) | length }}</div></div>
+    </div>
+  </div>
+
+  <!-- ===================== TASK BREAKDOWN ===================== -->
+  <div class="section">
+    <div class="section-title">Task Breakdown</div>
+    <table class="tasks">
+      <thead>
+        <tr>
+          <th style="width:5%;" class="center">#</th>
+          <th style="width:38%;">Task</th>
+          <th style="width:16%;">Grading method</th>
+          <th style="width:13%;" class="center">Points</th>
+          <th style="width:14%;" class="center">Result</th>
+          <th style="width:14%;">Feedback</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tasks %}
+        <tr>
+          <td class="center">{{ t.position | default(loop.index) }}</td>
+          <td>{{ t.prompt | default('—') }}</td>
+          <td class="grading-type">{{ t.grading_type | default('—') }}</td>
+          <td class="center">{{ t.points_awarded | default(0) }} / {{ t.points_possible | default(0) }}</td>
+          <td class="center">
+            <span class="task-status {{ t.status_class | default('review') }}">{{ t.status | default('Pending review') }}</span>
+          </td>
+          <td style="font-size:8.6pt;color:var(--muted);">{{ t.feedback | default('—') }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="text-align:center;color:var(--muted);">No tasks recorded for this lab.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ===================== INSTRUCTOR FEEDBACK ===================== -->
+  {% if teacher_feedback %}
+  <div class="section">
+    <div class="section-title">Instructor Feedback</div>
+    <div class="feedback-box">
+      &ldquo;{{ teacher_feedback }}&rdquo;
+      <div class="feedback-attr">— {{ teacher_name | default('Instructor') }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===================== SIGNATURES ===================== -->
+  <div class="signatures">
+    <div class="sig-block">
+      <div class="sig-line">{{ teacher_name | default('Instructor') }}</div>
+      <div class="role">Instructor of record</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-line">{{ date_completed | default('') }}</div>
+      <div class="role">Date issued</div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    This report was generated automatically by {{ platform_name | default('Mayajal') }} on {{ generated_at | default('—') }}.
+    Grades marked &ldquo;Awaiting review&rdquo; are provisional pending instructor sign-off.
+  </div>
+
+</body>
+</html>

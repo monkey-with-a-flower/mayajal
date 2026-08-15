@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ report_title | default('Session Attack Report') }} — {{ session_id | default('') }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 22mm 16mm 20mm 16mm;
+    @bottom-center {
+      content: "{{ platform_name | default('Mayajal') }} · Confidential · Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      color: #8892a6;
+      font-family: 'Inter', Arial, sans-serif;
+    }
+  }
+
+  :root{
+    --brand: {{ brand_color | default('#12213f') }};
+    --brand-accent: {{ brand_accent | default('#3d6bff') }};
+    --ink: #1a2233;
+    --muted: #66708a;
+    --line: #e2e6ee;
+    --panel: #f6f8fc;
+    --danger: #d84343;
+    --ok: #1f9d55;
+  }
+
+  * { box-sizing: border-box; }
+
+  body{
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+    color: var(--ink);
+    font-size: 10.3pt;
+    line-height: 1.5;
+    margin: 0;
+    background: #ffffff;
+  }
+
+  h1,h2,h3,h4 { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; margin: 0; color: var(--brand); }
+
+  code, .mono { font-family: 'JetBrains Mono', 'Consolas', 'SFMono-Regular', monospace; font-size: 8.6pt; }
+
+  /* ---------- Classification banner ---------- */
+  .classification-banner{
+    background: {{ classification_color | default('#d84343') }};
+    color: #fff;
+    text-align: center;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    font-size: 8.5pt;
+    padding: 4px 0;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+
+  /* ---------- Header ---------- */
+  .report-header{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 3px solid var(--brand);
+    padding-bottom: 14px;
+    margin-bottom: 18px;
+  }
+  .report-header .brand{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .report-header .brand img{
+    height: 42px;
+    width: auto;
+    display: block;
+  }
+  .report-header .brand-name{
+    font-size: 13pt;
+    font-weight: 800;
+    color: var(--brand);
+    letter-spacing: 0.01em;
+  }
+  .report-header .brand-tag{
+    font-size: 7.6pt;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 1px;
+  }
+  .report-header .doc-meta{
+    text-align: right;
+    font-size: 8pt;
+    color: var(--muted);
+  }
+  .report-header .doc-meta .report-id{ font-family: 'JetBrains Mono', monospace; color: var(--ink); }
+
+  /* ---------- Title block ---------- */
+  .title-block{ margin-bottom: 20px; }
+  .title-block h1{ font-size: 20pt; font-weight: 800; }
+  .title-block .subtitle{ color: var(--muted); font-size: 10pt; margin-top: 4px; }
+
+  /* ---------- Metadata grid ---------- */
+  .meta-grid{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  .meta-cell{
+    padding: 9px 12px;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .meta-cell:nth-child(4n){ border-right: none; }
+  .meta-cell .label{
+    font-size: 7.2pt;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+  .meta-cell .value{ font-size: 9.5pt; font-weight: 600; word-break: break-word; }
+  .meta-cell .value.mono{ font-weight: 500; }
+
+  /* ---------- Section headers ---------- */
+  .section{ margin-bottom: 22px; page-break-inside: avoid; }
+  .section-title{
+    display:flex; align-items:center; gap:8px;
+    font-size: 12.5pt;
+    font-weight: 800;
+    color: var(--brand);
+    border-bottom: 1.5px solid var(--brand);
+    padding-bottom: 5px;
+    margin-bottom: 12px;
+  }
+  .section-title .num{
+    display:inline-flex; align-items:center; justify-content:center;
+    width: 20px; height: 20px; border-radius: 4px;
+    background: var(--brand); color:#fff; font-size: 9pt; font-weight:800;
+  }
+
+  /* ---------- Stat cards ---------- */
+  .stat-row{ display:flex; gap: 10px; margin-bottom: 18px; }
+  .stat-card{
+    flex:1;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 14px;
+    background: #fff;
+  }
+  .stat-card .num{ font-size: 19pt; font-weight: 800; color: var(--brand); }
+  .stat-card.warn .num{ color: var(--danger); }
+  .stat-card .lbl{ font-size: 7.6pt; text-transform: uppercase; letter-spacing:.06em; color: var(--muted); margin-top:2px; }
+
+  /* ---------- Executive summary ---------- */
+  .exec-summary{
+    background: var(--panel);
+    border-left: 4px solid var(--brand-accent);
+    border-radius: 4px;
+    padding: 14px 16px;
+    font-size: 10pt;
+    color: #2b3550;
+  }
+
+  /* ---------- Phase / kill chain ---------- */
+  .phase{
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    page-break-inside: avoid;
+  }
+  .phase-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 10px 14px;
+    color: #fff;
+  }
+  .phase-head .tactic-name{ font-size: 10.6pt; font-weight: 800; }
+  .phase-head .technique{ font-size: 8.4pt; opacity: .92; font-family:'JetBrains Mono',monospace; }
+  .phase-head .count-badge{
+    background: rgba(255,255,255,0.22);
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-size: 8.2pt;
+    font-weight: 700;
+  }
+  .phase-body{ padding: 11px 14px; }
+  .phase-rationale{ font-size: 9.2pt; color: var(--muted); margin-bottom: 10px; font-style: italic; }
+
+  table.evidence{ width: 100%; border-collapse: collapse; font-size: 8.3pt; }
+  table.evidence th{
+    text-align:left; background: var(--panel); color: var(--muted);
+    text-transform: uppercase; letter-spacing:.04em; font-size:7.2pt;
+    padding: 6px 8px; border-bottom: 1px solid var(--line);
+  }
+  table.evidence td{
+    padding: 6px 8px; border-bottom: 1px solid #eef0f5; vertical-align: top;
+  }
+  table.evidence tr:last-child td{ border-bottom:none; }
+  table.evidence td.mono{ font-family:'JetBrains Mono',monospace; font-size: 8pt; }
+
+  .unmapped-note{
+    font-size: 8.4pt; color: var(--muted); background: #fbfbfd;
+    border: 1px dashed var(--line); border-radius: 5px; padding: 8px 10px; margin-top: 6px;
+  }
+
+  /* ---------- Provenance / notes ---------- */
+  .kv-list{ font-size: 9pt; }
+  .kv-list .row{ display:flex; padding: 6px 0; border-bottom: 1px solid #eef0f5; }
+  .kv-list .row .k{ width: 220px; color: var(--muted); flex-shrink:0; }
+  .kv-list .row .v{ font-family:'JetBrains Mono',monospace; font-size: 8.6pt; word-break: break-all; }
+
+  .notes-box{
+    border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px;
+    font-size: 9.5pt; background: #fffdf7; border-left: 4px solid #e6a339;
+  }
+
+  .limitations ul{ margin: 6px 0 0 18px; padding:0; font-size: 9pt; color: #2b3550; }
+  .limitations li{ margin-bottom: 4px; }
+
+  /* ---------- Footer / sign-off ---------- */
+  .sign-off{
+    margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line);
+    display:flex; justify-content: space-between; font-size: 8.4pt; color: var(--muted);
+  }
+
+  .page-break{ page-break-before: always; }
+  .report-actions{ position:sticky; top:0; z-index:20; display:flex; justify-content:flex-end; gap:8px; padding:10px; margin-bottom:12px; background:#fff; border-bottom:1px solid var(--line); }
+  .report-actions button{ border:0; border-radius:5px; padding:9px 14px; background:var(--brand); color:#fff; font-weight:700; cursor:pointer; }
+  @media print { .report-actions{ display:none; } }
+</style>
+</head>
+<body>
+
+  <div class="report-actions">
+    <button type="button" onclick="window.print()">Download / Save as PDF</button>
+  </div>
+
+  {% if classification %}
+  <div class="classification-banner">{{ classification }}</div>
+  {% endif %}
+
+  <!-- ===================== HEADER ===================== -->
+  <div class="report-header">
+    <div class="brand">
+      {% if platform_logo_url %}
+        <img src="{{ platform_logo_url }}" alt="{{ platform_name | default('Platform') }} logo">
+      {% endif %}
+      <div>
+        <div class="brand-name">{{ platform_name | default('Mayajal') }}</div>
+        <div class="brand-tag">{{ platform_tagline | default('Cyber Range &amp; Attack Simulation Platform') }}</div>
+      </div>
+    </div>
+    <div class="doc-meta">
+      <div>Report ID: <span class="report-id">{{ report_id | default(session_id) }}</span></div>
+      <div>Generated: {{ generated_at | default('') }}</div>
+      <div>Detection engine: {{ detection_engine_mode | default('legacy') }}</div>
+    </div>
+  </div>
+
+  <!-- ===================== TITLE ===================== -->
+  <div class="title-block">
+    <h1>{{ report_title | default('Session Attack Report') }}</h1>
+    <div class="subtitle">MITRE ATT&amp;CK–aligned reconstruction of activity observed during lab session {{ session_id | default('') }}</div>
+  </div>
+
+  <!-- ===================== METADATA GRID ===================== -->
+  <div class="meta-grid">
+    <div class="meta-cell"><div class="label">Lab</div><div class="value">{{ lab_name | default('—') }}</div></div>
+    <div class="meta-cell"><div class="label">Student</div><div class="value">{{ student_name | default('—') }}</div></div>
+    <div class="meta-cell"><div class="label">Session ID</div><div class="value mono">{{ session_id | default('—') }}</div></div>
+    <div class="meta-cell"><div class="label">Session status</div><div class="value">{{ session_status | default('Stopped') }}</div></div>
+
+    <div class="meta-cell"><div class="label">Start time</div><div class="value">{{ start_time | default('—') }}</div></div>
+    <div class="meta-cell"><div class="label">End time</div><div class="value">{{ end_time | default('—') }}</div></div>
+    <div class="meta-cell"><div class="label">Duration</div><div class="value">{{ duration | default('—') }}</div></div>
+    <div class="meta-cell"><div class="label">Machines in scope</div><div class="value">{{ machine_count | default('—') }}</div></div>
+  </div>
+
+  <!-- ===================== SUMMARY STATS ===================== -->
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="num">{{ total_events | default(0) }}</div>
+      <div class="lbl">Total events analyzed</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">{{ mapped_events | default(0) }}</div>
+      <div class="lbl">Mapped to ATT&amp;CK</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="num">{{ unmapped_events | default(0) }}</div>
+      <div class="lbl">Unmapped events</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">{{ phases | default([]) | length }}</div>
+      <div class="lbl">Tactics observed</div>
+    </div>
+  </div>
+
+  <!-- ===================== EXECUTIVE SUMMARY ===================== -->
+  <div class="section">
+    <div class="section-title"><span class="num">1</span> Executive Summary</div>
+    <div class="exec-summary">
+      {{ executive_summary | default('No executive summary was provided for this session.') }}
+    </div>
+  </div>
+
+  <!-- ===================== ATTACK CHAIN ===================== -->
+  <div class="section">
+    <div class="section-title"><span class="num">2</span> Reconstructed Attack Chain</div>
+
+    {% set tactic_colors = {
+      'Reconnaissance': '#64748b', 'Initial Access': '#e8590c', 'Execution': '#c9971f',
+      'Persistence': '#5c940d', 'Privilege Escalation': '#2f9e44', 'Defense Evasion': '#0c8599',
+      'Credential Access': '#1971c2', 'Discovery': '#3b5bdb', 'Lateral Movement': '#5f3dc4',
+      'Command and Control': '#862e9c', 'Exfiltration': '#a61e6e', 'Impact': '#c92a2a',
+      'Unmapped': '#868e96'
+    } %}
+
+    {% for phase in phases %}
+    <div class="phase">
+      <div class="phase-head" style="background: {{ tactic_colors.get(phase.tactic, '#334155') }};">
+        <div>
+          <div class="tactic-name">{{ phase.tactic }}</div>
+          <div class="technique">{{ phase.technique_id | default('—') }} · {{ phase.technique_name | default('Unclassified') }}</div>
+        </div>
+        <div class="count-badge">{{ phase.event_count | default(phase.evidence | length) }} event{{ 's' if (phase.event_count | default(phase.evidence|length)) != 1 else '' }}</div>
+      </div>
+      <div class="phase-body">
+        {% if phase.rationale %}
+        <div class="phase-rationale">{{ phase.rationale }}</div>
+        {% endif %}
+
+        {% if phase.evidence %}
+        <table class="evidence">
+          <thead>
+            <tr>
+              <th>Timestamp</th><th>Source</th><th>Destination</th>
+              <th>Event / Signature</th><th>SID</th><th>Rule file</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in phase.evidence %}
+            <tr>
+              <td class="mono">{{ e.timestamp | default('—') }}</td>
+              <td class="mono">{{ e.src_ip | default('—') }}</td>
+              <td class="mono">{{ e.dst_ip | default('—') }}</td>
+              <td>{{ e.signature | default(e.event_type) | default('—') }}</td>
+              <td class="mono">{{ e.sid | default('—') }}</td>
+              <td class="mono">{{ e.rule_file | default('—') }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if phase.tactic == 'Unmapped' %}
+        <div class="unmapped-note">
+          These events did not resolve to a specific ATT&amp;CK technique under the current detection engine mode
+          ({{ detection_engine_mode | default('legacy') }}). They are retained for analyst review rather than discarded.
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="unmapped-note">No individual evidence records were retained for this phase.</div>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="unmapped-note">No classified activity was recorded for this session.</div>
+    {% endfor %}
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- ===================== SESSION PROVENANCE ===================== -->
+  <div class="section">
+    <div class="section-title"><span class="num">3</span> Session &amp; Detection Provenance</div>
+    <div class="kv-list">
+      <div class="row"><div class="k">Lab / Scenario ID</div><div class="v">{{ lab_id | default('—') }}</div></div>
+      <div class="row"><div class="k">Project ID</div><div class="v">{{ project_id | default('—') }}</div></div>
+      <div class="row"><div class="k">Detection engine mode</div><div class="v">{{ detection_engine_mode | default('legacy') }}</div></div>
+      <div class="row"><div class="k">Detection bundle digest (SHA-256)</div><div class="v">{{ bundle_digest | default('n/a — legacy mode') }}</div></div>
+      <div class="row"><div class="k">OpenSearch index</div><div class="v">{{ opensearch_index | default('mayajal-logs-*') }}</div></div>
+      <div class="row"><div class="k">Report generated by</div><div class="v">{{ generated_by | default('system') }}</div></div>
+    </div>
+  </div>
+
+  <!-- ===================== ANALYST NOTES ===================== -->
+  {% if analyst_notes %}
+  <div class="section">
+    <div class="section-title"><span class="num">4</span> Analyst Notes</div>
+    <div class="notes-box">{{ analyst_notes }}</div>
+  </div>
+  {% endif %}
+
+  <!-- ===================== LIMITATIONS ===================== -->
+  <div class="section limitations">
+    <div class="section-title"><span class="num">5</span> Scope &amp; Detection Limitations</div>
+    <p style="font-size:9pt;color:var(--muted);margin:0 0 4px 0;">
+      This report reflects network-layer telemetry captured by the lab sensor and, where available, structured
+      application/system log detections. Readers should note the following constraints when interpreting results:
+    </p>
+    <ul>
+      {% for item in limitations | default([
+        'Network telemetry captures traffic visibility, not complete host-level behaviour (e.g. local commands, file changes).',
+        'Events without a matching detection-pack SID or log rule remain classified as Unmapped rather than guessed.',
+        'Evidence lists are capped per phase and are illustrative, not exhaustive, of all matching events.',
+        'Detection coverage reflects the rule set active in this session\'s bundle at the time it ran.'
+      ]) %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <!-- ===================== SIGN OFF ===================== -->
+  <div class="sign-off">
+    <div>{{ platform_name | default('Mayajal') }} — automatically generated attack report. Not a substitute for full incident response.</div>
+    <div>{{ report_footer_note | default('') }}</div>
+  </div>
+
+</body>
+</html>

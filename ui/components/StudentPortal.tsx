@@ -28,7 +28,6 @@ import {
   type ApiScenario,
   type AttackReport,
   deleteScenario,
-  downloadAttackReport,
   downloadLabAttachment,
   getAttackReport,
   getLabAttachments,
@@ -37,6 +36,7 @@ import {
   getStudentDashboard,
   type LabAttachment,
   listLabSessions,
+  openAttackReport,
   type ReportType,
   saveLabAnswers,
   saveScenario,
@@ -998,18 +998,12 @@ export default function StudentPortal(
         );
         return;
       }
-      const [result, pdfDocument] = await Promise.all([
+      const [result] = await Promise.all([
         getAttackReport(apiUrl, latest.id),
-        downloadAttackReport(apiUrl, latest.id, reportType),
+        openAttackReport(apiUrl, latest.id, reportType),
       ]);
       setReportLog(formatAttackReport(result));
-      const url = URL.createObjectURL(pdfDocument.blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = pdfDocument.filename;
-      link.click();
-      URL.revokeObjectURL(url);
-      setNotice("Downloaded " + pdfDocument.filename + ".");
+      setNotice("Opened the " + reportType + " report in a new page.");
     } catch (reason) {
       setNotice(
         reason instanceof Error

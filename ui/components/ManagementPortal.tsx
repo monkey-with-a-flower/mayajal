@@ -35,7 +35,6 @@ import {
   deleteTeacherGroup,
   deleteTeacherLab,
   discoverGitHubMachines,
-  downloadAttackReport,
   getAdminDashboard,
   getAttackReport,
   getLabVpn,
@@ -45,6 +44,7 @@ import {
   type GradingTask,
   importGitHubMachine,
   listLabSessions,
+  openAttackReport,
   type MachineInput,
   refreshGitHubMachine,
   type ReportType,
@@ -120,15 +120,6 @@ function Notice({ text }: { text: string }) {
 
 function downloadConfig(filename: string, config: string) {
   const url = URL.createObjectURL(new Blob([config], { type: "text/plain" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function downloadBlob(filename: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -963,13 +954,12 @@ function TeacherPortal({ apiUrl, view }: { apiUrl: string; view: string }) {
         setNotice("No sessions are available for " + lab.name + ".");
         return;
       }
-      const [report, pdfDocument] = await Promise.all([
+      const [report] = await Promise.all([
         getAttackReport(apiUrl, latest.id),
-        downloadAttackReport(apiUrl, latest.id, reportType),
+        openAttackReport(apiUrl, latest.id, reportType),
       ]);
       setProcessLog(formatAttackReport(report));
-      downloadBlob(pdfDocument.filename, pdfDocument.blob);
-      setNotice("Downloaded " + pdfDocument.filename + ".");
+      setNotice("Opened the " + reportType + " report in a new page.");
     } catch (error) {
       setNotice(
         error instanceof Error
@@ -2071,13 +2061,12 @@ function AdminPortal({ apiUrl, view }: { apiUrl: string; view: string }) {
         setNotice("No sessions are available for " + lab.name + ".");
         return;
       }
-      const [report, pdfDocument] = await Promise.all([
+      const [report] = await Promise.all([
         getAttackReport(apiUrl, latest.id),
-        downloadAttackReport(apiUrl, latest.id, reportType),
+        openAttackReport(apiUrl, latest.id, reportType),
       ]);
       setProcessLog(formatAttackReport(report));
-      downloadBlob(pdfDocument.filename, pdfDocument.blob);
-      setNotice("Downloaded " + pdfDocument.filename + ".");
+      setNotice("Opened the " + reportType + " report in a new page.");
     } catch (error) {
       setNotice(
         error instanceof Error

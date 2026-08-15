@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from api_test.auth import get_current_user, require_roles
@@ -19,8 +19,8 @@ from api_test.config import ASSETS_DIR, AUTH_MODE, LAB_RUNTIME_DIR, MAYAJAL_CORS
 from api_test.database import Base, SessionLocal, engine, get_db
 from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
 from api_test.detection_packs import bundle_registry
-from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
-from api_test.pdf_report import render_attack_report_pdf
+from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
+from api_test.html_report import render_report_html
 from api_test.runtime_safety import host_capacity, require_host_capacity
 from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, UserRead
 from api_test.services import require_lab_manager, require_student_access, start_session, stop_session
@@ -836,8 +836,8 @@ def get_session_attack_report(session_id: str, size: int = Query(10000, ge=1, le
     return build_attack_report(session_id, events, log_rules=log_rules, detection_registry=registry)
 
 
-@app.get("/sessions/{session_id}/attack-report.pdf")
-def download_session_attack_report(
+@app.get("/sessions/{session_id}/attack-report/view", response_class=HTMLResponse)
+def view_session_attack_report(
     session_id: str,
     size: int = Query(10000, ge=1, le=10000),
     report_type: Literal["academic", "professional"] = Query("professional"),
@@ -856,19 +856,13 @@ def download_session_attack_report(
     ]
     registry = bundle_registry(session.detection_bundle_digest) if session.detection_bundle_digest else None
     report = build_attack_report(session_id, events, log_rules=log_rules, detection_registry=registry)
-    document = render_attack_report_pdf(report, {
-        "lab_name": session.lab.name,
-        "student_name": session.student.name,
-        "started_at": session.started_at.isoformat(),
-        "stopped_at": session.stopped_at.isoformat() if session.stopped_at else None,
-    }, report_type=report_type)
-    safe_lab_name = re.sub(r"[^a-zA-Z0-9_-]+", "-", session.lab.name).strip("-").lower() or "lab"
-    filename = f"mayajal-{safe_lab_name}-{session.id[:8]}-{report_type}-report.pdf"
-    return Response(
-        content=document,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    submission = (
+        db.query(LabSubmission)
+        .filter(LabSubmission.lab_id == session.lab_id, LabSubmission.student_id == session.student_id)
+        .order_by(LabSubmission.submitted_at.desc())
+        .first()
     )
+    return HTMLResponse(render_report_html(report_type, session, report, submission, user.name))
 
 
 app.include_router(frontend_router)
