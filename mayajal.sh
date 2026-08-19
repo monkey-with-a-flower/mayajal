@@ -78,16 +78,17 @@ start_frontend() {
     return
   fi
   [[ -d "$ROOT_DIR/ui/node_modules" ]] || fail "Frontend dependencies are missing. Run npm install in ui/."
+  [[ -f "$ROOT_DIR/ui/.next/BUILD_ID" ]] || fail "Frontend production build is missing. Run npm run build in ui/."
   if [[ "$(uname -s)" == "Darwin" ]]; then
     node_bin="$(command -v node)"
     launchctl remove "$FRONTEND_LABEL" >/dev/null 2>&1 || true
     launchctl submit -l "$FRONTEND_LABEL" -o "$LOG_DIR/frontend.log" -e "$LOG_DIR/frontend.log" -- \
-      "$node_bin" "$ROOT_DIR/ui/node_modules/next/dist/bin/next" dev "$ROOT_DIR/ui" --hostname 0.0.0.0 --port 3000
+      "$node_bin" "$ROOT_DIR/ui/node_modules/next/dist/bin/next" start "$ROOT_DIR/ui" --hostname 0.0.0.0 --port 3000
     return
   fi
   (
     cd "$ROOT_DIR/ui"
-    nohup npm run dev -- --hostname 0.0.0.0 --port 3000 </dev/null >"$LOG_DIR/frontend.log" 2>&1 &
+    nohup npm run start -- --hostname 0.0.0.0 --port 3000 </dev/null >"$LOG_DIR/frontend.log" 2>&1 &
     echo $! >"$FRONTEND_PID_FILE"
   )
 }
