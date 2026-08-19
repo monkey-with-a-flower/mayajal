@@ -38,6 +38,7 @@ wait_http() {
 }
 
 start_backend() {
+  local runtime_path="$PATH"
   if curl -fsS --max-time 2 http://127.0.0.1:8001/health >/dev/null 2>&1; then
     say "Backend is already available on port 8001."
     return
@@ -46,7 +47,7 @@ start_backend() {
     if [[ "$(uname -s)" == "Darwin" ]]; then
       launchctl remove "$BACKEND_LABEL" >/dev/null 2>&1 || true
       launchctl submit -l "$BACKEND_LABEL" -o "$LOG_DIR/backend.log" -e "$LOG_DIR/backend.log" -- \
-        /bin/bash -c "cd \"$ROOT_DIR\" && exec api_test/.venv/bin/uvicorn api_test.main:app --host 0.0.0.0 --port 8001"
+        /bin/bash -c "export PATH=\"$runtime_path\"; cd \"$ROOT_DIR\" && exec api_test/.venv/bin/uvicorn api_test.main:app --host 0.0.0.0 --port 8001"
       return
     fi
     (
@@ -58,7 +59,7 @@ start_backend() {
     if [[ "$(uname -s)" == "Darwin" ]]; then
       launchctl remove "$BACKEND_LABEL" >/dev/null 2>&1 || true
       launchctl submit -l "$BACKEND_LABEL" -o "$LOG_DIR/backend.log" -e "$LOG_DIR/backend.log" -- \
-        /bin/bash -c "cd \"$ROOT_DIR\" && exec uv run --project api_test uvicorn api_test.main:app --host 0.0.0.0 --port 8001"
+        /bin/bash -c "export PATH=\"$runtime_path\"; cd \"$ROOT_DIR\" && exec uv run --project api_test uvicorn api_test.main:app --host 0.0.0.0 --port 8001"
       return
     fi
     (
