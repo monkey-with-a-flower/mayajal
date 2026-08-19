@@ -21,3 +21,4 @@ api_test/runtime/
 api_test/tests/test_mayajal.db
 test
 assets/logs/
+.mayajal/
