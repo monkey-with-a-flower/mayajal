@@ -8,8 +8,24 @@ RestartPolicy = str
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class SignupRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=100, pattern=r"^[a-zA-Z0-9._-]+$")
+    name: str = Field(min_length=2, max_length=160)
+    email: str = Field(min_length=5, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class UserCreate(SignupRequest):
+    role: Role = Role.student
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class UserRead(BaseModel):

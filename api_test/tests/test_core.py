@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 TEST_DB = Path(__file__).parent / "test_mayajal.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB}"
 os.environ["AUTH_MODE"] = "dev"
+os.environ["MAYAJAL_SEED_DEMO"] = "true"
 
 from api_test.database import Base, SessionLocal, engine
 from api_test.docker_runtime import prepare_lab_runtime
@@ -51,6 +52,30 @@ def login(client: TestClient, username: str, password: str) -> dict:
     response = client.post("/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200
     return {"Authorization": "Bearer " + response.json()["access_token"]}
+
+
+def test_signup_admin_user_creation_and_persistent_token(client: TestClient):
+    signup = client.post("/auth/signup", json={
+        "username": "new.student",
+        "name": "New Student",
+        "email": "new.student@example.local",
+        "password": "Student!2027",
+    })
+    assert signup.status_code == 201
+    student_headers = {"Authorization": "Bearer " + signup.json()["access_token"]}
+    assert client.get("/auth/me", headers=student_headers).json()["username"] == "new.student"
+
+    root_headers = login(client, "root", "MayajalRoot!2026")
+    created = client.post("/admin/users", headers=root_headers, json={
+        "username": "new.teacher",
+        "name": "New Teacher",
+        "email": "new.teacher@example.local",
+        "password": "Teacher!2027",
+        "role": "teacher",
+    })
+    assert created.status_code == 201
+    assert created.json()["role"] == "teacher"
+    assert client.post("/auth/login", json={"username": "new.teacher", "password": "Teacher!2027"}).status_code == 200
 
 
 def test_student_only_sees_assigned_lab_and_can_manage_own_session(client: TestClient):

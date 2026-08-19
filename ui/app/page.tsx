@@ -27,10 +27,10 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { accounts, labs, machines, roleProfiles, type Account, type Role } from "@/lib/data";
+import { labs, machines, roleProfiles, type Role } from "@/lib/data";
 import StudentPortal from "@/components/StudentPortal";
 import ManagementPortal from "@/components/ManagementPortal";
-import { signIn } from "@/lib/api";
+import { changePassword, clearSession, getCurrentUser, restoreSessionToken, signIn, signUp, type ApiUser } from "@/lib/api";
 
 const roleNavigation: Record<Role, { label: string; icon: typeof ShieldCheck }[]> = {
   student: [
@@ -326,18 +326,7 @@ function AdminWorkspace() {
       </div>
       <div className="space-y-6">
         <Panel eyebrow="Access control" title="Account directory" action={<ActionButton icon={Users} tone="secondary">Manage users</ActionButton>}>
-          <div className="divide-y divide-ink/10">
-            {accounts.map((member) => (
-              <div key={member.username} className="flex items-center gap-3 p-4">
-                <span className="grid h-10 w-10 place-items-center rounded-full bg-canopy text-sm font-black text-white">{member.initials}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-black text-ink">{member.name}</p>
-                  <p className="mt-1 text-xs text-ink/52">{member.username}</p>
-                </div>
-                <span className="rounded-full bg-mint/20 px-2.5 py-1 text-xs font-bold text-fern">{roleProfiles[member.role].label}</span>
-              </div>
-            ))}
-          </div>
+          <p className="p-4 text-sm text-ink/58">Open Access control to manage platform users and roles.</p>
         </Panel>
         <section className="rounded-lg bg-canopy p-5 text-white shadow-sm">
           <div className="flex items-start justify-between gap-3">
@@ -358,8 +347,14 @@ function AdminWorkspace() {
   );
 }
 
-function SignIn({ onSignIn }: { onSignIn: (username: string, password: string) => Promise<void> }) {
+function SignIn({ onSignIn, onSignUp }: {
+  onSignIn: (username: string, password: string) => Promise<void>;
+  onSignUp: (input: { username: string; name: string; email: string; password: string }) => Promise<void>;
+}) {
+  const [creating, setCreating] = useState(false);
   const [username, setUsername] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -369,7 +364,8 @@ function SignIn({ onSignIn }: { onSignIn: (username: string, password: string) =
     setSubmitting(true);
     setError("");
     try {
-      await onSignIn(username, password);
+      if (creating) await onSignUp({ username, name, email, password });
+      else await onSignIn(username, password);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to sign in.");
     } finally {
@@ -393,25 +389,16 @@ function SignIn({ onSignIn }: { onSignIn: (username: string, password: string) =
         </section>
         <section className="p-6 sm:p-10">
           <p className="text-xs font-bold uppercase text-ink/45">Account access</p>
-          <h2 className="mt-1 text-2xl font-black text-ink">Sign in to Mayajal</h2>
+          <h2 className="mt-1 text-2xl font-black text-ink">{creating ? "Create a student account" : "Sign in to Mayajal"}</h2>
           <form className="mt-7 space-y-4" onSubmit={submit}>
+            {creating ? <label className="block text-sm font-bold text-ink/72">Full name<input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 block min-h-11 w-full rounded-md border border-ink/15 px-3 text-ink outline-none focus:border-fern" autoComplete="name" /></label> : null}
+            {creating ? <label className="block text-sm font-bold text-ink/72">Email<input value={email} onChange={(event) => setEmail(event.target.value)} className="mt-2 block min-h-11 w-full rounded-md border border-ink/15 px-3 text-ink outline-none focus:border-fern" type="email" autoComplete="email" /></label> : null}
             <label className="block text-sm font-bold text-ink/72">Username<input value={username} onChange={(event) => setUsername(event.target.value)} className="mt-2 block min-h-11 w-full rounded-md border border-ink/15 px-3 text-ink outline-none focus:border-fern" autoComplete="username" /></label>
-            <label className="block text-sm font-bold text-ink/72">Password<input value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 block min-h-11 w-full rounded-md border border-ink/15 px-3 text-ink outline-none focus:border-fern" type="password" autoComplete="current-password" /></label>
+            <label className="block text-sm font-bold text-ink/72">Password<input value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 block min-h-11 w-full rounded-md border border-ink/15 px-3 text-ink outline-none focus:border-fern" type="password" autoComplete={creating ? "new-password" : "current-password"} /></label>
             {error ? <p className="rounded-md bg-clay/10 px-3 py-2 text-sm font-semibold text-clay">{error}</p> : null}
-            <button type="submit" disabled={submitting} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-canopy px-4 text-sm font-bold text-white hover:bg-fern disabled:cursor-not-allowed disabled:opacity-50">{submitting ? "Signing in" : "Sign in"}<ArrowRight size={17} /></button>
+            <button type="submit" disabled={submitting} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-canopy px-4 text-sm font-bold text-white hover:bg-fern disabled:cursor-not-allowed disabled:opacity-50">{submitting ? "Please wait" : creating ? "Create account" : "Sign in"}<ArrowRight size={17} /></button>
           </form>
-          <div className="mt-8 border-t border-ink/10 pt-5">
-            <p className="text-xs font-bold uppercase text-ink/45">Training accounts</p>
-            <div className="mt-3 grid gap-2">
-              {accounts.map((account) => (
-                <button key={account.username} type="button" onClick={() => { setUsername(account.username); setPassword(account.password); setError(""); }} className="grid gap-1 rounded-md border border-ink/10 p-3 text-left transition hover:border-fern/50 hover:bg-cloud sm:grid-cols-[1fr_auto_auto] sm:items-center sm:gap-3">
-                  <span><span className="block text-sm font-black text-ink">{roleProfiles[account.role].label}</span><span className="mt-1 block text-xs text-ink/54">{account.name}</span></span>
-                  <code className="text-xs font-semibold text-ink/68">{account.username}</code>
-                  <code className="text-xs font-semibold text-ink/68">{account.password}</code>
-                </button>
-              ))}
-            </div>
-          </div>
+          <button type="button" onClick={() => { setCreating((value) => !value); setError(""); }} className="mt-6 text-sm font-bold text-canopy hover:text-fern">{creating ? "Already registered? Sign in" : "Need an account? Sign up"}</button>
         </section>
       </div>
     </main>
@@ -419,10 +406,12 @@ function SignIn({ onSignIn }: { onSignIn: (username: string, password: string) =
 }
 
 export default function Home() {
-  const [account, setAccount] = useState<Account | null>(null);
+  const [account, setAccount] = useState<ApiUser | null>(null);
   const [apiUrl, setApiUrl] = useState("http://127.0.0.1:8001");
   const [endpointDraft, setEndpointDraft] = useState("http://127.0.0.1:8001");
   const [activeNav, setActiveNav] = useState("My learning");
+  const [passwordDraft, setPasswordDraft] = useState({ current: "", next: "" });
+  const [passwordNotice, setPasswordNotice] = useState("");
   const role = account?.role ?? "student";
 
   useEffect(() => {
@@ -432,6 +421,13 @@ export default function Home() {
         const endpoint = browserApiEndpoint(config.apiUrl);
         setApiUrl(endpoint);
         setEndpointDraft(endpoint);
+        if (restoreSessionToken()) {
+          getCurrentUser(endpoint).then((user) => {
+            const initials = user.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+            setAccount({ id: user.id, name: user.name, role: user.role, initials });
+            setActiveNav(roleNavigation[user.role][0].label);
+          }).catch(() => clearSession());
+        }
       })
       .catch(() => { const endpoint = browserApiEndpoint(); setApiUrl(endpoint); setEndpointDraft(endpoint); });
   }, []);
@@ -445,9 +441,13 @@ export default function Home() {
 
   async function handleSignIn(username: string, password: string) {
     const result = await signIn(apiUrl, username, password);
-    const selected = accounts.find((candidate) => candidate.username === username);
-    if (!selected) throw new Error("This account is not configured for the workspace.");
-    setAccount({ ...selected, name: result.user.name, initials: result.user.initials, role: result.user.role });
+    setAccount(result.user);
+    setActiveNav(roleNavigation[result.user.role][0].label);
+  }
+
+  async function handleSignUp(input: { username: string; name: string; email: string; password: string }) {
+    const result = await signUp(apiUrl, input);
+    setAccount(result.user);
     setActiveNav(roleNavigation[result.user.role][0].label);
   }
 
@@ -459,7 +459,18 @@ export default function Home() {
     setApiUrl(endpoint);
   }
 
-  if (!account) return <SignIn onSignIn={handleSignIn} />;
+  async function savePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const result = await changePassword(apiUrl, passwordDraft.current, passwordDraft.next);
+      setPasswordDraft({ current: "", next: "" });
+      setPasswordNotice(result.message);
+    } catch (error) {
+      setPasswordNotice(error instanceof Error ? error.message : "Unable to update password.");
+    }
+  }
+
+  if (!account) return <SignIn onSignIn={handleSignIn} onSignUp={handleSignUp} />;
 
   const Workspace = role === "student" ? StudentWorkspace : role === "teacher" ? TeacherWorkspace : AdminWorkspace;
 
@@ -470,7 +481,8 @@ export default function Home() {
           <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-lg bg-canopy text-white"><Shield size={23} /></span><div><p className="text-lg font-black text-ink">Mayajal</p><p className="text-xs font-medium text-ink/54">Cyber lab workspace</p></div></div>
           <nav className="mt-8 space-y-1">{roleNavigation[role].map((item, index) => { const Icon = item.icon; return <button type="button" key={item.label} onClick={() => setActiveNav(item.label)} className={clsx("flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-sm font-semibold", activeNav === item.label || (index === 0 && !activeNav) ? "bg-canopy text-white" : "text-ink/68 hover:bg-canopy/8 hover:text-ink")}><Icon size={18} />{item.label}</button>; })}</nav>
           {role === "admin" ? <form onSubmit={saveServiceEndpoint} className="mt-8 rounded-lg border border-ink/10 bg-white p-4"><label className="text-xs font-bold uppercase text-ink/48">Service endpoint<input value={endpointDraft} onChange={(event) => setEndpointDraft(event.target.value)} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 text-xs font-semibold text-ink outline-none focus:border-fern" aria-label="Service endpoint" /></label><button type="submit" className="mt-2 min-h-9 w-full rounded-md bg-canopy px-3 text-xs font-bold text-white hover:bg-fern">Apply endpoint</button></form> : null}
-          <button type="button" onClick={() => setAccount(null)} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md px-3 text-sm font-bold text-ink/62 hover:bg-ink/5"><LogOut size={17} />Sign out</button>
+          <form onSubmit={savePassword} className="mt-4 rounded-lg border border-ink/10 bg-white p-4"><p className="text-xs font-bold uppercase text-ink/48">Change password</p><input required minLength={8} type="password" placeholder="Current password" value={passwordDraft.current} onChange={(event) => setPasswordDraft((value) => ({ ...value, current: event.target.value }))} className="mt-2 min-h-9 w-full rounded-md border border-ink/15 px-3 text-xs" /><input required minLength={8} type="password" placeholder="New password" value={passwordDraft.next} onChange={(event) => setPasswordDraft((value) => ({ ...value, next: event.target.value }))} className="mt-2 min-h-9 w-full rounded-md border border-ink/15 px-3 text-xs" />{passwordNotice ? <p className="mt-2 text-xs font-semibold text-fern">{passwordNotice}</p> : null}<button type="submit" className="mt-2 min-h-9 w-full rounded-md border border-canopy/20 px-3 text-xs font-bold text-canopy hover:bg-cloud">Update password</button></form>
+          <button type="button" onClick={() => { clearSession(); setAccount(null); }} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md px-3 text-sm font-bold text-ink/62 hover:bg-ink/5"><LogOut size={17} />Sign out</button>
         </aside>
         <section className="min-w-0 p-4 sm:p-6 xl:p-8">
           <header className="flex flex-col gap-4 border-b border-ink/10 pb-6 sm:flex-row sm:items-start sm:justify-between">

@@ -14,15 +14,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from api_test.auth import get_current_user, require_roles
-from api_test.config import ASSETS_DIR, AUTH_MODE, LAB_RUNTIME_DIR, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS, MAYAJAL_SESSION_MAX_MINUTES
+from api_test.auth import get_current_user, hash_password, require_roles, verify_password
+from api_test.config import ASSETS_DIR, AUTH_MODE, LAB_RUNTIME_DIR, MAYAJAL_CORS_ORIGIN_REGEX, MAYAJAL_CORS_ORIGINS, MAYAJAL_SESSION_MAX_MINUTES, ROOT_ADMIN_EMAIL, ROOT_ADMIN_PASSWORD, ROOT_ADMIN_USERNAME, SEED_DEMO_DATA
 from api_test.database import Base, SessionLocal, engine, get_db
 from api_test.docker_runtime import DockerProcessError, compose_command, instance_id, lab_network_cidr, run_process, stream_process, verify_compose_project, wait_for_wireguard_config
 from api_test.detection_packs import bundle_registry
 from api_test.models import Lab, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.html_report import render_report_html
 from api_test.runtime_safety import host_capacity, require_host_capacity
-from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, UserRead
+from api_test.schemas import AssignmentCreate, LabCreate, LabRead, LabSessionRead, LoginRequest, MachineCreate, MachineRead, PasswordChangeRequest, SignupRequest, UserRead
 from api_test.services import require_lab_manager, require_student_access, start_session, stop_session
 from api_test.telemetry import build_attack_report, search_session_events
 from api_test.frontend_contract import router as frontend_router, user_payload
@@ -66,8 +66,9 @@ TASK_GRADING_COLUMNS = {
     "points": "INTEGER DEFAULT 1",
 }
 
-DEV_PASSWORDS = {
+DEMO_PASSWORDS = {
     "student.maya": "Student!2026",
+    "student.lena": "Student!2026",
     "teacher.asha": "Teacher!2026",
     "admin.samir": "Admin!2026",
 }
@@ -152,6 +153,9 @@ def migrate_database() -> None:
         for name, ddl in TASK_GRADING_COLUMNS.items():
             if name not in task_columns:
                 connection.exec_driver_sql(f"ALTER TABLE lab_tasks ADD COLUMN {name} {ddl}")
+        user_columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(users)").all()}
+        if "password_hash" not in user_columns:
+            connection.exec_driver_sql("ALTER TABLE users ADD COLUMN password_hash VARCHAR(300)")
         connection.exec_driver_sql("UPDATE machines SET source_type = 'dockerhub' WHERE source_type IS NULL")
         connection.exec_driver_sql("UPDATE machines SET restart_policy = 'unless-stopped' WHERE restart_policy IS NULL")
         connection.exec_driver_sql("UPDATE machines SET privileged = 0 WHERE privileged IS NULL")
@@ -174,6 +178,28 @@ def migrate_database() -> None:
 def seed_database() -> None:
     db = SessionLocal()
     try:
+        root = db.query(User).filter(User.username == ROOT_ADMIN_USERNAME).first()
+        if root is None:
+            root = User(
+                username=ROOT_ADMIN_USERNAME,
+                name="Root Administrator",
+                email=ROOT_ADMIN_EMAIL,
+                role=Role.admin,
+                password_hash=hash_password(ROOT_ADMIN_PASSWORD),
+            )
+            db.add(root)
+            db.commit()
+        if not SEED_DEMO_DATA:
+            if not db.get(SystemSetting, "registration"):
+                db.add(SystemSetting(id="registration", label="Student self-registration", enabled=True))
+            for setting_id, label, enabled in [
+                ("teacher_publish", "Teacher lab publishing", True),
+                ("machine_review", "Machine image approval", True),
+            ]:
+                if not db.get(SystemSetting, setting_id):
+                    db.add(SystemSetting(id=setting_id, label=label, enabled=enabled))
+            db.commit()
+            return
         user_specs = [
             ("student.maya", "Maya Patel", "maya.patel@example.local", Role.student),
             ("teacher.asha", "Asha Rana", "asha.rana@example.local", Role.teacher),
@@ -182,7 +208,7 @@ def seed_database() -> None:
         ]
         for username, name, email, role in user_specs:
             if not db.query(User).filter(User.username == username).first():
-                db.add(User(username=username, name=name, email=email, role=role))
+                db.add(User(username=username, name=name, email=email, role=role, password_hash=hash_password(DEMO_PASSWORDS[username])))
         db.commit()
 
         admin = db.query(User).filter(User.username == "admin.samir").one()
@@ -207,7 +233,7 @@ def seed_database() -> None:
         db.commit()
 
         setting_specs = [
-            ("registration", "Student self-registration", False),
+            ("registration", "Student self-registration", True),
             ("teacher_publish", "Teacher lab publishing", True),
             ("machine_review", "Machine image approval", True),
         ]
@@ -331,12 +357,39 @@ async def force_stop_runtime(session_id: str, db: Session = Depends(get_db), use
 def dev_login(payload: LoginRequest, db: Session = Depends(get_db)):
     if AUTH_MODE != "dev":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Development login is disabled. Sign in through Microsoft Entra ID.")
-    if DEV_PASSWORDS.get(payload.username) != payload.password:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Username or password is incorrect.")
     user = db.query(User).filter(User.username == payload.username).first()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Development user is unavailable.")
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Username or password is incorrect.")
     return {"access_token": "dev:" + user.username, "token_type": "bearer", "user": user_payload(user)}
+
+
+@app.post("/auth/signup", status_code=status.HTTP_201_CREATED)
+def signup(payload: SignupRequest, db: Session = Depends(get_db)):
+    if AUTH_MODE != "dev":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Local signup is disabled.")
+    registration = db.get(SystemSetting, "registration")
+    if registration is not None and not registration.enabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Student registration is currently disabled.")
+    username = payload.username.strip().lower()
+    email = payload.email.strip().lower()
+    if db.query(User).filter((User.username == username) | (User.email == email)).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username or email is already registered.")
+    user = User(username=username, name=payload.name.strip(), email=email, role=Role.student, password_hash=hash_password(payload.password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"access_token": "dev:" + user.username, "token_type": "bearer", "user": user_payload(user)}
+
+
+@app.patch("/auth/password")
+def change_password(payload: PasswordChangeRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if AUTH_MODE != "dev":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Passwords are managed by Microsoft Entra ID.")
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect.")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"message": "Password updated."}
 
 
 @app.get("/auth/me", response_model=UserRead)

@@ -76,6 +76,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     name: Mapped[str] = mapped_column(String(160))
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.student)
+    password_hash: Mapped[str | None] = mapped_column(String(300), nullable=True)
     entra_object_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 

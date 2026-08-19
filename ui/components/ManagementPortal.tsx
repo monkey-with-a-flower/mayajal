@@ -28,6 +28,7 @@ import {
   type AttackReport,
   changeSetting,
   changeUserRole,
+  createAdminUser,
   completeReview,
   createAdminMachine,
   createTeacherGroup,
@@ -1818,6 +1819,7 @@ function AdminPortal({ apiUrl, view }: { apiUrl: string; view: string }) {
   const [labs, setLabs] = useState<ApiLab[]>([]);
   const [machines, setMachines] = useState<ApiMachine[]>([]);
   const [users, setUsers] = useState<AdminDashboard["users"]>([]);
+  const [userDraft, setUserDraft] = useState({ username: "", name: "", email: "", password: "", role: "student" as "student" | "teacher" | "admin" });
   const [settings, setSettings] = useState<AdminDashboard["settings"]>([]);
   const [notice, setNotice] = useState("");
   const [processLog, setProcessLog] = useState("");
@@ -1970,6 +1972,17 @@ function AdminPortal({ apiUrl, view }: { apiUrl: string; view: string }) {
       setNotice(
         error instanceof Error ? error.message : "Unable to update access.",
       );
+    }
+  }
+  async function addUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const created = await createAdminUser(apiUrl, userDraft);
+      setUsers((items) => [...items, created].sort((left, right) => left.name.localeCompare(right.name)));
+      setUserDraft({ username: "", name: "", email: "", password: "", role: "student" });
+      setNotice(created.message);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to add user.");
     }
   }
   async function toggleSetting(id: string, enabled: boolean) {
@@ -2221,8 +2234,18 @@ function AdminPortal({ apiUrl, view }: { apiUrl: string; view: string }) {
   }
   if (view === "Access control") {
     return (
-      <div>
+      <div className="space-y-5">
         <Notice text={notice} />
+        <Panel eyebrow="Local accounts" title="Add a user">
+          <form onSubmit={addUser} className="grid gap-4 p-4 md:grid-cols-2">
+            <label className="text-sm font-bold text-ink/72">Full name<input required value={userDraft.name} onChange={(event) => setUserDraft((value) => ({ ...value, name: event.target.value }))} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 font-medium outline-none focus:border-fern" /></label>
+            <label className="text-sm font-bold text-ink/72">Username<input required value={userDraft.username} onChange={(event) => setUserDraft((value) => ({ ...value, username: event.target.value }))} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 font-medium outline-none focus:border-fern" /></label>
+            <label className="text-sm font-bold text-ink/72">Email<input required type="email" value={userDraft.email} onChange={(event) => setUserDraft((value) => ({ ...value, email: event.target.value }))} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 font-medium outline-none focus:border-fern" /></label>
+            <label className="text-sm font-bold text-ink/72">Temporary password<input required minLength={8} type="password" value={userDraft.password} onChange={(event) => setUserDraft((value) => ({ ...value, password: event.target.value }))} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 font-medium outline-none focus:border-fern" /></label>
+            <label className="text-sm font-bold text-ink/72">Role<select value={userDraft.role} onChange={(event) => setUserDraft((value) => ({ ...value, role: event.target.value as "student" | "teacher" | "admin" }))} className="mt-2 min-h-10 w-full rounded-md border border-ink/15 px-3 font-medium outline-none focus:border-fern"><option value="student">Student</option><option value="teacher">Teacher</option><option value="admin">Administrator</option></select></label>
+            <div className="flex items-end"><button type="submit" className="min-h-10 rounded-md bg-canopy px-4 text-sm font-bold text-white hover:bg-fern">Add user</button></div>
+          </form>
+        </Panel>
         <Panel eyebrow="Users and roles" title="Account directory">
           <div className="divide-y divide-ink/10">
             {users.map((user) => (

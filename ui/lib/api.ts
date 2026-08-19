@@ -162,6 +162,17 @@ export type LoginResult = {
 
 let accessToken = "";
 
+export function restoreSessionToken() {
+  accessToken = window.localStorage.getItem("mayajal.accessToken") ?? "";
+  return accessToken;
+}
+
+export function clearSession() {
+  accessToken = "";
+  window.localStorage.removeItem("mayajal.accessToken");
+  window.localStorage.removeItem("mayajal.user");
+}
+
 function trimUrl(url: string) {
   return url.replace(/\/$/, "");
 }
@@ -206,7 +217,29 @@ export async function signIn(
     body: JSON.stringify({ username, password }),
   });
   accessToken = result.access_token;
+  window.localStorage.setItem("mayajal.accessToken", accessToken);
+  window.localStorage.setItem("mayajal.user", JSON.stringify(result.user));
   return result;
+}
+
+export function signUp(apiUrl: string, input: { username: string; name: string; email: string; password: string }) {
+  return request<LoginResult>(apiUrl, "/auth/signup", { method: "POST", body: JSON.stringify(input) }).then((result) => {
+    accessToken = result.access_token;
+    window.localStorage.setItem("mayajal.accessToken", accessToken);
+    window.localStorage.setItem("mayajal.user", JSON.stringify(result.user));
+    return result;
+  });
+}
+
+export function getCurrentUser(apiUrl: string) {
+  return request<ApiUser & { username?: string; email?: string }>(apiUrl, "/auth/me");
+}
+
+export function changePassword(apiUrl: string, currentPassword: string, newPassword: string) {
+  return request<{ message: string }>(apiUrl, "/auth/password", {
+    method: "PATCH",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
 }
 
 export function getStudentDashboard(apiUrl: string) {
@@ -758,6 +791,13 @@ export function changeUserRole(
   >(apiUrl, "/admin/users/" + userId + "/role", {
     method: "PATCH",
     body: JSON.stringify({ role }),
+  });
+}
+
+export function createAdminUser(apiUrl: string, input: { username: string; name: string; email: string; password: string; role: "student" | "teacher" | "admin" }) {
+  return request<AdminDashboard["users"][number] & { message: string }>(apiUrl, "/admin/users", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

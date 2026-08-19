@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from api_test.auth import require_roles
-from api_test.config import AUTH_MODE, IMPORTED_MACHINES_DIR
+from api_test.auth import hash_password, require_roles
+from api_test.config import AUTH_MODE, IMPORTED_MACHINES_DIR, ROOT_ADMIN_USERNAME
 from api_test.database import get_db
 from api_test.models import Lab, LabAnswer, LabAssignment, LabSession, LabStatus, LabSubmission, LabTask, Machine, MachineImportVersion, Role, Scenario, ScenarioSession, SessionStatus, StudentGroup, SystemSetting, User
 from api_test.services import require_lab_manager, require_student_access, start_session
@@ -107,6 +107,14 @@ class GitHubRepositoryRequest(BaseModel):
 
 class RoleRequest(BaseModel):
     role: Role
+
+
+class AdminUserRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=100, pattern=r"^[a-zA-Z0-9._-]+$")
+    name: str = Field(min_length=2, max_length=160)
+    email: str = Field(min_length=5, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+    role: Role = Role.student
 
 
 class SettingRequest(BaseModel):
@@ -821,9 +829,26 @@ def change_role(user_id: str, payload: RoleRequest, db: Session = Depends(get_db
     target = db.get(User, user_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    if target.username == ROOT_ADMIN_USERNAME and payload.role != Role.admin:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The root administrator role cannot be removed.")
     target.role = payload.role
     db.commit()
     return {"id": target.id, "role": target.role.value, "message": target.name + " now has " + target.role.value + " access."}
+
+
+@router.post("/admin/users", status_code=status.HTTP_201_CREATED)
+def create_user(payload: AdminUserRequest, db: Session = Depends(get_db), user: User = Depends(require_roles(Role.admin))):
+    if AUTH_MODE == "entra":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Users are managed by Microsoft Entra ID.")
+    username = payload.username.strip().lower()
+    email = payload.email.strip().lower()
+    if db.query(User).filter((User.username == username) | (User.email == email)).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username or email is already registered.")
+    member = User(username=username, name=payload.name.strip(), email=email, role=payload.role, password_hash=hash_password(payload.password))
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+    return {"id": member.id, "name": member.name, "username": member.username, "role": member.role.value, "status": "Active", "message": member.name + " was added."}
 
 
 @router.patch("/admin/settings/{setting_id}")

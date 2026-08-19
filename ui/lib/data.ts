@@ -12,14 +12,6 @@ import {
 
 export type Role = "student" | "teacher" | "admin";
 
-export type Account = {
-  username: string;
-  password: string;
-  name: string;
-  role: Role;
-  initials: string;
-};
-
 export type Permission = {
   label: string;
   student: boolean;
@@ -54,30 +46,6 @@ export const roleProfiles: Record<
     badge: "Full privilege",
   },
 };
-
-export const accounts: Account[] = [
-  {
-    username: "student.maya",
-    password: "Student!2026",
-    name: "Maya Patel",
-    role: "student",
-    initials: "MP",
-  },
-  {
-    username: "teacher.asha",
-    password: "Teacher!2026",
-    name: "Asha Rana",
-    role: "teacher",
-    initials: "AR",
-  },
-  {
-    username: "admin.samir",
-    password: "Admin!2026",
-    name: "Samir Khan",
-    role: "admin",
-    initials: "SK",
-  },
-];
 
 export const permissions: Permission[] = [
   { label: "Start assigned labs", student: true, teacher: true, admin: true },

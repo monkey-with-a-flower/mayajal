@@ -1,4 +1,7 @@
 from collections.abc import Callable
+import hashlib
+import hmac
+import os
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -10,6 +13,25 @@ from api_test.database import get_db
 from api_test.models import Role, User
 
 bearer = HTTPBearer(auto_error=False)
+
+
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 310_000)
+    return "pbkdf2_sha256$310000$" + salt.hex() + "$" + digest.hex()
+
+
+def verify_password(password: str, encoded: str | None) -> bool:
+    if not encoded:
+        return False
+    try:
+        algorithm, iterations, salt_hex, digest_hex = encoded.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), int(iterations))
+        return hmac.compare_digest(actual.hex(), digest_hex)
+    except (TypeError, ValueError):
+        return False
 
 
 def unauthorized(detail: str = "Authentication is required."):
