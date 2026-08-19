@@ -117,7 +117,11 @@ start_all() {
   start_frontend
   say "Waiting for platform health checks..."
   health_all
-  say "Mayajal is ready: http://localhost:3000"
+  say "Mayajal is listening on all interfaces: http://0.0.0.0:3000"
+  local lan_ip=""
+  if command -v ipconfig >/dev/null 2>&1; then lan_ip="$(ipconfig getifaddr en0 2>/dev/null || true)"; fi
+  if [[ -z "$lan_ip" ]] && command -v hostname >/dev/null 2>&1; then lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"; fi
+  [[ -n "$lan_ip" ]] && say "Open from another device: http://$lan_ip:3000"
 }
 
 stop_pid_file() {

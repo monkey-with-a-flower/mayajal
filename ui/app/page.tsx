@@ -54,6 +54,22 @@ const roleNavigation: Record<Role, { label: string; icon: typeof ShieldCheck }[]
   ],
 };
 
+function browserApiEndpoint(configured?: string) {
+  const browserDefault = window.location.protocol + "//" + window.location.hostname + ":8001";
+  const saved = window.localStorage.getItem("mayajal.serviceEndpoint");
+  if (!saved) return configured || browserDefault;
+  try {
+    const savedHost = new URL(saved).hostname;
+    const remoteBrowser = !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+    if (remoteBrowser && ["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(savedHost)) {
+      return configured || browserDefault;
+    }
+  } catch {
+    return configured || browserDefault;
+  }
+  return saved;
+}
+
 const roleMetrics: Record<Role, { label: string; value: string; detail: string; icon: typeof Activity }[]> = {
   student: [
     { label: "Active labs", value: "2", detail: "1 ready to resume", icon: Play },
@@ -413,11 +429,11 @@ export default function Home() {
     fetch("/api/runtime-config")
       .then((response) => response.json())
       .then((config: { apiUrl?: string }) => {
-        const endpoint = window.localStorage.getItem("mayajal.serviceEndpoint") || config.apiUrl || "http://127.0.0.1:8001";
+        const endpoint = browserApiEndpoint(config.apiUrl);
         setApiUrl(endpoint);
         setEndpointDraft(endpoint);
       })
-      .catch(() => { const endpoint = window.localStorage.getItem("mayajal.serviceEndpoint") || "http://127.0.0.1:8001"; setApiUrl(endpoint); setEndpointDraft(endpoint); });
+      .catch(() => { const endpoint = browserApiEndpoint(); setApiUrl(endpoint); setEndpointDraft(endpoint); });
   }, []);
 
   const heading = useMemo(() => {
